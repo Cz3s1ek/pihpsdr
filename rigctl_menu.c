@@ -33,7 +33,7 @@
 #include "vfo.h"
 
 int  serial_enable;
-char ser_port[64]="/dev/ttyAMA0";
+char ser_port[64]="/dev/ttyUSB0";
 int serial_baud_rate = B9600;
 int serial_parity = 0; // 0=none, 1=even, 2=odd
 gboolean rigctl_debug=FALSE;
