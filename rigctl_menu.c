@@ -66,7 +66,7 @@ static void rigctl_value_changed_cb(GtkWidget *widget, gpointer data) {
 }
 
 static void serial_value_changed_cb(GtkWidget *widget, gpointer data) {
-     sprintf(ser_port,"/dev/ttyACM%0d",(int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget))); 
+     sprintf(ser_port,"/dev/ttyAMA%0d",(int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget))); 
      fprintf(stderr,"RIGCTL_MENU: New Serial port=%s\n",ser_port);
 }
 
