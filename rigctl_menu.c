@@ -33,7 +33,7 @@
 #include "vfo.h"
 
 int  serial_enable;
-char ser_port[64]="/dev/ttyAMA0";
+char ser_port[64]="/dev/ttyACM0";
 int serial_baud_rate = B9600;
 int serial_parity = 0; // 0=none, 1=even, 2=odd
 gboolean rigctl_debug=FALSE;
@@ -66,7 +66,7 @@ static void rigctl_value_changed_cb(GtkWidget *widget, gpointer data) {
 }
 
 static void serial_value_changed_cb(GtkWidget *widget, gpointer data) {
-     sprintf(ser_port,"/dev/ttyAMA%0d",(int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget))); 
+     sprintf(ser_port,"/dev/ttyACM%0d",(int) gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget))); 
      fprintf(stderr,"RIGCTL_MENU: New Serial port=%s\n",ser_port);
 }
 
