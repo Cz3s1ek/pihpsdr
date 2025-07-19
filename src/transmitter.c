@@ -424,9 +424,6 @@ void tx_restore_state(TRANSMITTER *tx) {
     GetPropI1("transmitter.%d.alcmode",                             tx->id,    tx->alcmode);
     GetPropI1("transmitter.%d.fft_size",                            tx->id,    tx->fft_size);
     GetPropI1("transmitter.%d.fps",                                 tx->id,    tx->fps);
-    // The next two  lines will soon be removed (backwards compatibility)
-    GetPropI0("tx_filter_low",                                                 tx->default_filter_low);
-    GetPropI0("tx_filter_high",                                                tx->default_filter_low);
     GetPropI1("transmitter.%d.default_filter_low",                  tx->id,    tx->default_filter_low);
     GetPropI1("transmitter.%d.default_filter_high",                 tx->id,    tx->default_filter_high);
     GetPropI1("transmitter.%d.filter_low",                          tx->id,    tx->filter_low);
@@ -821,8 +818,11 @@ void tx_create_dialog(TRANSMITTER *tx) {
   //t_print("create_dialog: add tx->panel\n");
   gtk_widget_set_size_request (tx->panel, tx_dialog_width, tx_dialog_height);
   gtk_container_add(GTK_CONTAINER(content), tx->panel);
+  //
+  // Handle key presses in the TX dialog through the handler in main.c
+  //
   gtk_widget_add_events(tx->dialog, GDK_KEY_PRESS_MASK);
-  g_signal_connect(tx->dialog, "key_press_event", G_CALLBACK(keypress_cb), NULL);
+  g_signal_connect(tx->dialog, "key_press_event", G_CALLBACK(radio_keypress_cb), NULL);
 }
 
 static void tx_create_visual(TRANSMITTER *tx) {
@@ -1946,7 +1946,6 @@ void tx_set_filter(TRANSMITTER *tx) {
     case modeAM:
     case modeSAM:
     case modeSPEC:
-    case modeFMN:
       high =  filter->high;
       break;
 
@@ -1967,7 +1966,7 @@ void tx_set_filter(TRANSMITTER *tx) {
   switch (txmode) {
   case modeCWL:
   case modeCWU:
-    // Our CW signal is always at zero in IQ space, but note
+    // Our CW signal is always at zero frequency in IQ space, but note
     // WDSP is by-passed anyway.
     tx->filter_low  = -150;
     tx->filter_high = 150;
@@ -1977,11 +1976,21 @@ void tx_set_filter(TRANSMITTER *tx) {
   case modeAM:
   case modeSAM:
   case modeSPEC:
-  case  modeFMN:
     // disregard the "low" value and use (-high, high)
-    // FMN: filtering is applied to the  signal *before* the FM modulator
     tx->filter_low = -high;
     tx->filter_high = high;
+    break;
+
+  case  modeFMN:
+    //
+    // FMN: the TX bandpass is applied to the signal *before* the FM modulator.
+    //      While WDSP is (meanwhile) more flexible here, piHPSDR still assumes
+    //      that the max audio frequency used in FMN is 3000 Hz.
+    //      BTW, the FM modulator then contains an additional bandpass filter
+    //      with corner frequencies from Carsons's rule, +/-(Deviation + AudioHighCut)
+    //
+    tx->filter_low = -3000;
+    tx->filter_high = 3000;
     break;
 
   case modeLSB:
@@ -2159,12 +2168,51 @@ void tx_off(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   // switch TX OFF, wait until slew-down completed
   SetChannelState(tx->id, 0, 1);
+#ifdef SOAPYSDR
+
+  if (have_lime) {
+    // LIME: set TX gain to zero, disconnect antenna, execute TRX relay, and "unmute" receivers
+    soapy_protocol_set_tx_gain(tx, 0); //set gain to zero
+    soapy_protocol_set_tx_antenna(tx, 0); //set antenna to none which disconnects the output
+    const char *bank = "MAIN"; //set GPIO to signal the relay to RX
+    t_print("Transmitter:Setting GPIO to 0");
+    SoapySDRDevice *sdr = get_soapy_device();
+    SoapySDRDevice_writeGPIODir(sdr, bank, 0xFF);
+    SoapySDRDevice_writeGPIO(sdr, bank, 0x00);
+
+    for (int i = 0; i < RECEIVERS; i++) {
+      soapy_protocol_unattenuate(receiver[i]); //unattenuate RX (relays for UHF+ are very leaky)
+    }
+  }
+
+#endif
+
 }
 
 void tx_on(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   // switch TX ON
   SetChannelState(tx->id, 1, 0);
+#ifdef SOAPYSDR
+
+  if (have_lime) {
+    // LIME: "mute" receivers, execute TRX relay, connect TX antenna, set nominal TX drive
+    for (int i = 0; i < RECEIVERS; i++) {
+      soapy_protocol_attenuate(receiver[i]);
+    }
+
+    SoapySDRDevice *sdr = get_soapy_device();
+    const char *bank = "MAIN";
+    t_print("Transmitter:Setting GPIO to 1");
+    SoapySDRDevice_writeGPIODir(sdr, bank, 0xFF);
+    SoapySDRDevice_writeGPIO(sdr, bank, 0x01);
+    usleep(30000);
+    soapy_protocol_set_tx_antenna(tx, dac.antenna);
+    soapy_protocol_set_tx_gain(tx, tx->drive);
+  }
+
+#endif
+
 }
 
 void tx_ps_getinfo(TRANSMITTER *tx) {

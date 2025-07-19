@@ -71,6 +71,9 @@
 #include "test_menu.h"
 #include "toolbar.h"
 #include "transmitter.h"
+#ifdef TTS
+  #include "tts.h"
+#endif
 #include "tx_panadapter.h"
 #ifdef SATURN
   #include "saturnmain.h"
@@ -344,6 +347,176 @@ static SaturnSerialPort SaturnSerialPortsList[] = {
 };
 
 static void radio_restore_state();
+
+//
+// This is the key-press handler which is activated as soon as the
+// radio is running
+//
+// cppcheck-suppress constParameterCallback
+gboolean radio_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer data) {
+  gboolean ret = TRUE;
+
+  //
+  // Intercept key-strokes. The "keypad" stuff
+  // has been contributed by Ron.
+  // Everything that is not intercepted is handled downstream.
+  //
+  // space             ==>  MOX
+  // u                 ==>  active receiver VFO up
+  // d                 ==>  active receiver VFO down
+  // Keypad 0..9       ==>  NUMPAD 0 ... 9
+  // Keypad Decimal    ==>  NUMPAD DEC
+  // Keypad Subtract   ==>  NUMPAD BS
+  // Keypad Divide     ==>  NUMPAD CL
+  // Keypad Multiply   ==>  NUMPAD Hz
+  // Keypad Add        ==>  NUMPAD kHz
+  // Keypad Enter      ==>  NUMPAD MHz
+  //
+  // Function keys invoke Text-to-Speech machine
+  // (see tts.c)
+  // F1                ==>  Frequency
+  // F2                ==>  Mode
+  // F3                ==>  Filter width
+  // F4                ==>  RX S-meter level
+  // F5                ==>  TX drive
+  // F6                ==>  Attenuation/Preamp
+  //
+  switch (event->keyval) {
+#ifdef TTS
+  case GDK_KEY_F1:
+    tts_freq();
+    break;
+
+  case GDK_KEY_F2:
+    tts_mode();
+    break;
+
+  case GDK_KEY_F3:
+    tts_filter();
+    break;
+
+  case GDK_KEY_F4:
+    tts_smeter();
+    break;
+
+  case GDK_KEY_F5:
+    tts_txdrive();
+    break;
+
+  case GDK_KEY_F6:
+    tts_atten();
+    break;
+#endif
+
+  case GDK_KEY_space:
+    radio_toggle_mox();
+    break;
+
+  case  GDK_KEY_d:
+    vfo_step(-1);
+    break;
+
+  case GDK_KEY_u:
+    vfo_step(1);
+    break;
+
+  //
+  // Suggestion of Richard: using U and D for changing
+  // the frequency of the "other" VFO in large steps
+  // (useful for split operation)
+  //
+  case  GDK_KEY_U:
+    vfo_id_step(1 - active_receiver->id, 10);
+    break;
+
+  case  GDK_KEY_D:
+    vfo_id_step(1 - active_receiver->id, -10);
+    break;
+
+  //
+  // This is a contribution of Ron, it uses a keypad for
+  // entering a frequency
+  //
+  case GDK_KEY_KP_0:
+    vfo_num_pad(0, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_1:
+    vfo_num_pad(1, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_2:
+    vfo_num_pad(2, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_3:
+    vfo_num_pad(3, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_4:
+    vfo_num_pad(4, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_5:
+    vfo_num_pad(5, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_6:
+    vfo_num_pad(6, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_7:
+    vfo_num_pad(7, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_8:
+    vfo_num_pad(8, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_9:
+    vfo_num_pad(9, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_Divide:
+    vfo_num_pad(-1, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_Multiply:
+    vfo_num_pad(-2, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_Add:
+    vfo_num_pad(-3, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_Enter:
+    vfo_num_pad(-4, active_receiver->id);
+    break;
+
+  //
+  // Some countries (e.g. Germany) do not have a "decimal point"
+  // in a properly localised OS. In Germany we have a comma instead.
+  // A quick-and-dirty fix accepts both a decimal and a comma
+  // (a.k.a. separator) here.
+  //
+  case GDK_KEY_KP_Decimal:
+  case GDK_KEY_KP_Separator:
+    vfo_num_pad(-5, active_receiver->id);
+    break;
+
+  case GDK_KEY_KP_Subtract:
+    vfo_num_pad(-6, active_receiver->id);
+    break;
+
+  default:
+    // not intercepted, so handle downstream
+    ret = FALSE;
+    break;
+  }
+
+  g_idle_add(ext_vfo_update, NULL);
+  return ret;
+}
 
 void radio_stop() {
   ASSERT_SERVER();
@@ -1121,11 +1294,6 @@ void radio_start_radio() {
   case SOAPYSDR_USB_DEVICE:
     drive_min = radio->info.soapy.tx_gain_min;
     drive_max = radio->info.soapy.tx_gain_max;
-    //if (have_lime) {
-    //  drive_max = 64.0;
-    //} else if (strcmp(radio->name, "plutosdr") == 0) {
-    //  drive_max = 89.0;
-    //}
     pa_power = PA_1W;
     break;
 
@@ -1359,7 +1527,6 @@ void radio_start_radio() {
 
   case SOAPYSDR_USB_DEVICE:
 
-    //if (have_lime) == 0) {
     if (radio->info.soapy.rx_channels > 1) {
       n_adc = 2;
     } else {
@@ -1385,7 +1552,7 @@ void radio_start_radio() {
     soapy_iqswap = 1;
     receivers = 1;
 
-    if (radio->info.soapy.rx_channels > 1) {   // have_lime
+    if (radio->info.soapy.rx_channels > 1) {
       receivers = 2;
     }
 
@@ -1478,7 +1645,7 @@ void radio_start_radio() {
     t_print("%s: setup RECEIVERS SOAPYSDR\n", __FUNCTION__);
     RECEIVERS = 1;
 
-    if (radio->info.soapy.rx_channels > 1) {   // have_lime
+    if (radio->info.soapy.rx_channels > 1) {
       RECEIVERS = 2;
     }
 
@@ -1517,42 +1684,66 @@ void radio_start_radio() {
     }
   }
 
-  if (protocol == SOAPYSDR_PROTOCOL) {
-    for (int i = 0; i < RECEIVERS; i++) {
-      RECEIVER *rx = receiver[i];
 #ifdef SOAPYSDR
-       soapy_protocol_create_receiver(rx);
-#endif
+  if (protocol == SOAPYSDR_PROTOCOL) {
+    if (!have_lime) {
+      //
+      // LIME: do not start receivers before TX is running
+      //       since this starts auto-calibration.
+      //       Do not forget to do this below in the LIME case!
+      //
+      for (int i = 0; i < RECEIVERS; i++) {
+        soapy_protocol_create_receiver(receiver[i]);
+      }
     }
 
     if (can_transmit) {
-#ifdef SOAPYSDR
       soapy_protocol_create_transmitter(transmitter);
       soapy_protocol_set_tx_antenna(transmitter, dac.antenna);
-      soapy_protocol_set_tx_gain(transmitter, transmitter->drive);
+      //
+      // LIME: set TX gain to 30 for the auto-calibration that takes place
+      //       upon starting the transmitter
+      //
+      soapy_protocol_set_tx_gain(transmitter, have_lime ? 30 : transmitter->drive);
       soapy_protocol_set_tx_frequency(transmitter);
       soapy_protocol_start_transmitter(transmitter);
-#endif
+      if (have_lime) {
+        // LIME: set TX gain to 0 to avoid  LO leak. The TX gain
+        //       is set to the nominal drive upon RX/TX transistons,
+        //       and reset to zero upon TX/RX transitions.
+        soapy_protocol_set_tx_gain(transmitter, 0);
+      }
     }
 
     for (int id = 0; id < RECEIVERS; id++) {
       RECEIVER *rx = receiver[id];
       int rxadc = rx->adc;
-#ifdef SOAPYSDR
+      soapy_protocol_set_automatic_gain(rx, adc[rxadc].agc);
       soapy_protocol_set_rx_antenna(rx, adc[rxadc].antenna);
       soapy_protocol_set_rx_frequency(rx, id);
-      soapy_protocol_start_receiver(rx);
+
+      if (have_lime && RECEIVERS == 2) {
+        // LIME: This one has a single (Soapy) receiver with two
+        //       channels, so we have to create and start this
+        //       *pair* in a single call
+        if (id == 0) {
+          soapy_protocol_create_dual_receiver(receiver[0],receiver[1]);
+          soapy_protocol_start_dual_receiver(receiver[0],receiver[1]);
+        }
+      } else {
+        soapy_protocol_start_receiver(rx);
+      }
+
       soapy_protocol_set_gain(rx);
-      soapy_protocol_set_automatic_gain(rx, adc[rxadc].agc);
 
       if (!adc[rxadc].agc) { soapy_protocol_set_gain(rx); }
-#endif
 
       if (vfo[id].ctun) {
         rx_set_frequency(rx, vfo[id].ctun_frequency);
       }
     }
-  }
+  }  // protocol == SOAPYSDR
+#endif
 
   gdk_window_set_cursor(gtk_widget_get_window(top_window), gdk_cursor_new(GDK_ARROW));
 #ifdef MIDI
@@ -1601,6 +1792,12 @@ void radio_start_radio() {
 
   g_idle_add(ext_vfo_update, NULL);
   schedule_high_priority();
+
+  //
+  // Now the radio is up and running. Connect "Radio" keyboard interceptor
+  //
+  g_signal_handler_disconnect(top_window, keypress_signal_id);
+  keypress_signal_id = g_signal_connect(top_window, "key_press_event", G_CALLBACK(radio_keypress_cb), NULL);
 }
 
 void radio_remote_change_receivers(int r) {
@@ -2414,7 +2611,13 @@ void radio_set_drive(double value) {
 
   case SOAPYSDR_PROTOCOL:
 #ifdef SOAPYSDR
-    soapy_protocol_set_tx_gain(transmitter, transmitter->drive);
+    //
+    // LIME: do not change TX drive if not transmitting
+    //       (this is now done on each RX/TX and TX/RX transition)
+    //
+    if (!have_lime || radio_is_transmitting()) {
+      soapy_protocol_set_tx_gain(transmitter, transmitter->drive);
+    }
 #endif
     break;
   }
@@ -2960,6 +3163,11 @@ int radio_remote_start(void *data) {
 
   start_vfo_timer();
   remote_started = TRUE;
+  //
+  // Now the radio is up and running. Connect "Radio" keyboard interceptor
+  //
+  g_signal_handler_disconnect(top_window, keypress_signal_id);
+  keypress_signal_id = g_signal_connect(top_window, "key_press_event", G_CALLBACK(radio_keypress_cb), NULL);
   return 0;
 }
 

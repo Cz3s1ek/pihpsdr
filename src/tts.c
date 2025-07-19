@@ -46,6 +46,10 @@
 // 19080, and sends the text to eSpeak/festival.
 //
 
+// For MacOS, we in addition use the MacOS TTS capabilities
+
+#ifdef TTS
+
 #include <gtk/gtk.h>
 
 #include <unistd.h>
@@ -58,23 +62,33 @@
 #include "receiver.h"
 #include "vfo.h"
 
+#ifdef __APPLE__
+#include "MacTTS.h"
+#endif
+
 //
 // tts_send: send broadcast UDP packet containing a string
+//           on MacOS do both: send UDP packet and use MacTTS
 //
-static void tts_send(char *msg) {
+void tts_send(char *msg) {
   int sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  int optval = 1;
-  struct sockaddr_in addr;
-  //t_print("%s: sending >>>%s<<<\n", __FUNCTION__, msg);
-  setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &optval, sizeof(optval));
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-  setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-  addr.sin_port = htons(19080);
-  sendto(sock, msg, strlen(msg), 0, (struct sockaddr * ) &addr, sizeof(addr));
-  close(sock);
+  if (sock >= 0) {
+    int optval = 1;
+    struct sockaddr_in addr;
+    //t_print("%s: sending >>>%s<<<\n", __FUNCTION__, msg);
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &optval, sizeof(optval));
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+    setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    addr.sin_port = htons(19080);
+    sendto(sock, msg, strlen(msg), 0, (struct sockaddr * ) &addr, sizeof(addr));
+    close(sock);
+  }
+#ifdef __APPLE__
+  MacTTS(msg);
+#endif
 }
 
 //
@@ -232,3 +246,5 @@ void tts_atten() {
 
   tts_send(msg);
 }
+
+#endif

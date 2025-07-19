@@ -59,7 +59,6 @@
 #endif
 #include "startup.h"
 #include "test_menu.h"
-#include "tts.h"
 #include "version.h"
 #include "vfo.h"
 
@@ -78,6 +77,7 @@ static GdkCursor *cursor_watch;
 
 GtkWidget *top_window = NULL;
 GtkWidget *topgrid;
+gulong keypress_signal_id = 0;
 
 static GtkWidget *status_label;
 
@@ -94,176 +94,13 @@ static pthread_t wisdom_thread_id;
 static int wisdom_running = 0;
 
 static void* wisdom_thread(void *arg) {
-  WDSPwisdom ((char *)arg);
+  if (WDSPwisdom ((char *)arg)) {
+    t_print("WDSP wisdom file has been rebuilt.\n");
+  } else {
+    t_print("Re-using existing WDSP wisdom file.\n");
+  }
   wisdom_running = 0;
   return NULL;
-}
-
-// cppcheck-suppress constParameterCallback
-gboolean keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer data) {
-  gboolean ret = TRUE;
-
-  // Ignore key-strokes until radio is ready
-  if (radio == NULL) { return FALSE; }
-
-  //
-  // Intercept key-strokes. The "keypad" stuff
-  // has been contributed by Ron.
-  // Everything that is not intercepted is handled downstream.
-  //
-  // space             ==>  MOX
-  // u                 ==>  active receiver VFO up
-  // d                 ==>  active receiver VFO down
-  // Keypad 0..9       ==>  NUMPAD 0 ... 9
-  // Keypad Decimal    ==>  NUMPAD DEC
-  // Keypad Subtract   ==>  NUMPAD BS
-  // Keypad Divide     ==>  NUMPAD CL
-  // Keypad Multiply   ==>  NUMPAD Hz
-  // Keypad Add        ==>  NUMPAD kHz
-  // Keypad Enter      ==>  NUMPAD MHz
-  //
-  // Function keys invoke Text-to-Speech machine
-  // (see tts.c)
-  // F1                ==>  Frequency
-  // F2                ==>  Mode
-  // F3                ==>  Filter width
-  // F4                ==>  RX S-meter level
-  // F5                ==>  TX drive
-  // F6                ==>  Attenuation/Preamp
-  //
-  switch (event->keyval) {
-  case GDK_KEY_F1:
-    tts_freq();
-    break;
-
-  case GDK_KEY_F2:
-    tts_mode();
-    break;
-
-  case GDK_KEY_F3:
-    tts_filter();
-    break;
-
-  case GDK_KEY_F4:
-    tts_smeter();
-    break;
-
-  case GDK_KEY_F5:
-    tts_txdrive();
-    break;
-
-  case GDK_KEY_F6:
-    tts_atten();
-    break;
-
-  case GDK_KEY_space:
-    radio_toggle_mox();
-    break;
-
-  case  GDK_KEY_d:
-    vfo_step(-1);
-    break;
-
-  case GDK_KEY_u:
-    vfo_step(1);
-    break;
-
-  //
-  // Suggestion of Richard: using U and D for changing
-  // the frequency of the "other" VFO in large steps
-  // (useful for split operation)
-  //
-  case  GDK_KEY_U:
-    vfo_id_step(1 - active_receiver->id, 10);
-    break;
-
-  case  GDK_KEY_D:
-    vfo_id_step(1 - active_receiver->id, -10);
-    break;
-
-  //
-  // This is a contribution of Ron, it uses a keypad for
-  // entering a frequency
-  //
-  case GDK_KEY_KP_0:
-    vfo_num_pad(0, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_1:
-    vfo_num_pad(1, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_2:
-    vfo_num_pad(2, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_3:
-    vfo_num_pad(3, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_4:
-    vfo_num_pad(4, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_5:
-    vfo_num_pad(5, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_6:
-    vfo_num_pad(6, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_7:
-    vfo_num_pad(7, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_8:
-    vfo_num_pad(8, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_9:
-    vfo_num_pad(9, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_Divide:
-    vfo_num_pad(-1, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_Multiply:
-    vfo_num_pad(-2, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_Add:
-    vfo_num_pad(-3, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_Enter:
-    vfo_num_pad(-4, active_receiver->id);
-    break;
-
-  //
-  // Some countries (e.g. Germany) do not have a "decimal point"
-  // in a properly localised OS. In Germany we have a comma instead.
-  // A quick-and-dirty fix accepts both a decimal and a comma
-  // (a.k.a. separator) here.
-  //
-  case GDK_KEY_KP_Decimal:
-  case GDK_KEY_KP_Separator:
-    vfo_num_pad(-5, active_receiver->id);
-    break;
-
-  case GDK_KEY_KP_Subtract:
-    vfo_num_pad(-6, active_receiver->id);
-    break;
-
-  default:
-    // not intercepted, so handle downstream
-    ret = FALSE;
-    break;
-  }
-
-  g_idle_add(ext_vfo_update, NULL);
-  return ret;
 }
 
 // cppcheck-suppress constParameterCallback
@@ -279,6 +116,11 @@ static int init(void *data) {
   char wisdom_directory[1025];
   char text[1024];
   t_print("%s\n", __FUNCTION__);
+  //
+  // We want to intercept some key strokes
+  //
+  gtk_widget_add_events(top_window, GDK_KEY_PRESS_MASK);
+  keypress_signal_id = g_signal_connect(top_window, "key_press_event", G_CALLBACK(discovery_keypress_cb), NULL);
   audio_get_cards();
   cursor_arrow = gdk_cursor_new(GDK_ARROW);
   cursor_watch = gdk_cursor_new(GDK_WATCH);
@@ -404,11 +246,6 @@ static void activate_pihpsdr(GtkApplication *app, gpointer data) {
   }
 
   g_signal_connect (top_window, "delete-event", G_CALLBACK (main_delete), NULL);
-  //
-  // We want to use the space-bar as an alternative to go to TX
-  //
-  gtk_widget_add_events(top_window, GDK_KEY_PRESS_MASK);
-  g_signal_connect(top_window, "key_press_event", G_CALLBACK(keypress_cb), NULL);
   topgrid = gtk_grid_new();
   gtk_widget_set_size_request(topgrid, display_width, display_height);
   gtk_grid_set_row_homogeneous(GTK_GRID(topgrid), FALSE);

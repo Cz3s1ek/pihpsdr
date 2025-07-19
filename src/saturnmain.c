@@ -481,8 +481,9 @@ static void saturn_init_duc_iq() {
   memset(IQWriteBuffer, 0, IQBufferSize);
   //
   // open DMA device driver
+  // there is at least one XDMA device driver around which *needs* write-only here
   //
-  DMADUCWritefile_fd = open(VDUCDMADEVICE, O_RDWR);
+  DMADUCWritefile_fd = open(VDUCDMADEVICE, O_WRONLY);
 
   if (DMADUCWritefile_fd < 0) {
     t_print("%s: XDMA write device open failed for TX I/Q data\n", __FUNCTION__);
@@ -595,8 +596,9 @@ static void saturn_init_speaker_audio() {
   memset(SpkWriteBuffer, 0, SpkBufferSize);
   //
   // open DMA device driver
+  // there is at least one XDMA device driver around which *needs* write-only here
   //
-  DMASpkWritefile_fd = open(VSPKDMADEVICE, O_RDWR);
+  DMASpkWritefile_fd = open(VSPKDMADEVICE, O_WRONLY);
 
   if (DMASpkWritefile_fd < 0) {
     t_print("%s: XDMA write device open failed for spk data\n", __FUNCTION__);
@@ -862,8 +864,9 @@ static gpointer saturn_micaudio_thread(gpointer arg) {
   memset(MicReadBuffer, 0, MicBufferSize);
   //
   // open DMA device driver
+  // there is at least one XDMA device driver around which *needs* read-only here
   //
-  DMAReadfile_fd = open(VMICDMADEVICE, O_RDWR);
+  DMAReadfile_fd = open(VMICDMADEVICE, O_RDONLY);
 
   if (DMAReadfile_fd < 0) {
     t_print("%s: XDMA read device open failed for mic data\n", __FUNCTION__);
@@ -1042,8 +1045,9 @@ static gpointer saturn_rx_thread(gpointer arg) {
 
   //
   // open DMA device driver
+  // there is at least one XDMA device driver around which *needs* read-only here
   //
-  IQReadfile_fd = open(VDDCDMADEVICE, O_RDWR);
+  IQReadfile_fd = open(VDDCDMADEVICE, O_RDONLY);
 
   if (IQReadfile_fd < 0) {
     t_print("%s: XDMA read device open failed for DDC data\n", __FUNCTION__);
