@@ -16,9 +16,9 @@ GPIO=ON
 MIDI=ON
 SATURN=ON
 USBOZY=OFF
-SOAPYSDR=OFF
+SOAPYSDR=ON
 STEMLAB=OFF
-AUDIO=PULSE
+AUDIO=ALSA
 EXTENDED_NR=OFF
 
 #######################################################################################
