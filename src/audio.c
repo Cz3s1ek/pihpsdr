@@ -125,8 +125,7 @@ int audio_open_output(RECEIVER *rx) {
     g_mutex_lock(&rx->local_audio_mutex);
 
     if ((err = snd_pcm_open (&rx->playback_handle, hw, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK)) < 0) {
-      t_print("%s: cannot open audio device %s (%s)\n",
-              __FUNCTION__,
+      t_print("%s: cannot open audio device %s (%s)\n", __FUNCTION__,
               hw,
               snd_strerror (err));
       g_mutex_unlock(&rx->local_audio_mutex);
@@ -160,17 +159,17 @@ int audio_open_output(RECEIVER *rx) {
 
   switch (rx->local_audio_format) {
   case SND_PCM_FORMAT_S16_LE:
-    t_print("%s: local_audio_buffer: size=%d sample=%ld\n", __FUNCTION__, out_buffer_size, sizeof(int16_t));
+    t_print("%s: local_audio_buffer: size=%d sample=%d\n", __FUNCTION__, out_buffer_size, (int) sizeof(int16_t));
     rx->local_audio_buffer = g_new(int16_t, 2 * out_buffer_size);
     break;
 
   case SND_PCM_FORMAT_S32_LE:
-    t_print("%s: local_audio_buffer: size=%d sample=%ld\n", __FUNCTION__, out_buffer_size, sizeof(int32_t));
+    t_print("%s: local_audio_buffer: size=%d sample=%d\n", __FUNCTION__, out_buffer_size, (int) sizeof(int32_t));
     rx->local_audio_buffer = g_new(int32_t, 2 * out_buffer_size);
     break;
 
   case SND_PCM_FORMAT_FLOAT_LE:
-    t_print("%s: local_audio_buffer: size=%d sample=%ld\n", __FUNCTION__, out_buffer_size, sizeof(float));
+    t_print("%s: local_audio_buffer: size=%d sample=%d\n", __FUNCTION__, out_buffer_size, (int) sizeof(float));
     rx->local_audio_buffer = g_new(float, 2 * out_buffer_size);
     break;
 
@@ -214,8 +213,7 @@ int audio_open_input() {
     g_mutex_lock(&audio_mutex);
 
     if ((err = snd_pcm_open (&record_handle, hw, SND_PCM_STREAM_CAPTURE, SND_PCM_ASYNC)) < 0) {
-      t_print("%s: cannot open audio device %s (%s)\n",
-              __FUNCTION__,
+      t_print("%s: cannot open audio device %s (%s)\n", __FUNCTION__,
               hw,
               snd_strerror (err));
       record_handle = NULL;
@@ -252,20 +250,20 @@ int audio_open_input() {
 
   switch (record_audio_format) {
   case SND_PCM_FORMAT_S16_LE:
-    t_print("%s: mic_buffer: size=%d channels=%d sample=%ld bytes\n", __FUNCTION__, mic_buffer_size, channels,
-            sizeof(int16_t));
+    t_print("%s: mic_buffer: size=%d channels=%d sample=%d bytes\n", __FUNCTION__, mic_buffer_size, (int) channels,
+            (int) sizeof(int16_t));
     mic_buffer = g_new(int16_t, mic_buffer_size);
     break;
 
   case SND_PCM_FORMAT_S32_LE:
-    t_print("%s: mic_buffer: size=%d channels=%d sample=%ld bytes\n", __FUNCTION__, mic_buffer_size, channels,
-            sizeof(int32_t));
+    t_print("%s: mic_buffer: size=%d channels=%d sample=%d bytes\n", __FUNCTION__, mic_buffer_size, (int) channels,
+            (int) sizeof(int32_t));
     mic_buffer = g_new(int32_t, mic_buffer_size);
     break;
 
   case SND_PCM_FORMAT_FLOAT_LE:
-    t_print("%s: mic_buffer: size=%d channels=%d sample=%ld bytes\n", __FUNCTION__, mic_buffer_size, channels,
-            sizeof(float));
+    t_print("%s: mic_buffer: size=%d channels=%d sample=%d bytes\n", __FUNCTION__, mic_buffer_size, (int) channels,
+            (int) sizeof(float));
     mic_buffer = g_new(float, mic_buffer_size);
     break;
 
@@ -290,7 +288,7 @@ int audio_open_input() {
   mic_read_thread_id = g_thread_try_new("microphone", mic_read_thread, NULL, &error);
 
   if (!mic_read_thread_id ) {
-    t_print("g_thread_new failed on mic_read_thread: %s\n", error->message);
+    t_print("%s: g_thread_new failed on mic_read_thread: %s\n", __FUNCTION__, error->message);
     g_mutex_unlock(&audio_mutex);
     audio_close_input();
     return -1;
@@ -499,15 +497,11 @@ int audio_write(RECEIVER *rx, float left_sample, float right_sample) {
   int txmode = vfo_get_tx_mode();
 
   //
-  // We have to stop the stream here if a CW side tone may occur.
-  // This might cause underflows, but we cannot use audio_write
-  // and cw_audio_write simultaneously on the same device.
-  // Instead, the side tone version will take over.
-  // If *not* doing CW, the stream continues because we might wish
-  // to listen to this rx while transmitting.
+  // If a CW/TUNE side tone may occur, quickly return
   //
-  if (rx == active_receiver && radio_is_transmitting() && (txmode == modeCWU || txmode == modeCWL)) {
-    return 0;
+  if (rx == active_receiver && radio_is_transmitting()) {
+    if (txmode == modeCWU || txmode == modeCWL) { return 0; }
+    if (can_transmit && transmitter->tune && transmitter->swrtune) { return 0; }
   }
 
   // lock AFTER checking the "quick return" condition but BEFORE checking the pointers
@@ -633,8 +627,7 @@ static void *mic_read_thread(gpointer arg) {
   t_print("%s: snd_pcm_start\n", __FUNCTION__);
 
   if ((rc = snd_pcm_start (record_handle)) < 0) {
-    t_print("%s: cannot start audio interface for use (%s)\n",
-            __FUNCTION__,
+    t_print("%s: cannot start audio interface for use (%s)\n", __FUNCTION__,
             snd_strerror (rc));
     return NULL;
   }
@@ -645,8 +638,7 @@ static void *mic_read_thread(gpointer arg) {
     if ((rc = snd_pcm_readi (record_handle, mic_buffer, mic_buffer_size)) != mic_buffer_size) {
       if (running) {
         if (rc < 0) {
-          t_print("%s: read from audio interface failed (%s)\n",
-                  __FUNCTION__,
+          t_print("%s: read from audio interface failed (%s)\n", __FUNCTION__,
                   snd_strerror (rc));
           //running=FALSE;
         } else {
@@ -788,7 +780,7 @@ void audio_get_cards() {
           input_devices[n_input_devices].description = strdup(device_id);
           input_devices[n_input_devices].index = 0; // not used
           n_input_devices++;
-          t_print("input_device: %s\n", device_id);
+          t_print("%s: input_device: %s\n", device_id, __FUNCTION__);
         }
       }
 
@@ -805,7 +797,7 @@ void audio_get_cards() {
           output_devices[n_output_devices].description = strdup(device_id);
           output_devices[n_output_devices].index = 0; // not used
           n_output_devices++;
-          t_print("output_device: %s\n", device_id);
+          t_print("%s: output_device: %s\n", __FUNCTION__, device_id);
         }
       }
     }
@@ -842,7 +834,7 @@ void audio_get_cards() {
 
         output_devices[n_output_devices].index = 0; // not used
         n_output_devices++;
-        t_print("output_device: name=%s descr=%s\n", name, descr);
+        t_print("%s: output_device: name=%s descr=%s\n", __FUNCTION__, name, descr);
       }
 
 #ifdef INCLUDE_SNOOP
@@ -859,7 +851,7 @@ void audio_get_cards() {
 
         input_devices[n_input_devices].index = 0; // not used
         n_input_devices++;
-        t_print("input_device: name=%s descr=%s\n", name, descr);
+        t_print("%s: input_device: name=%s descr=%s\n", __FUNCTION__, name, descr);
       }
 
 #endif

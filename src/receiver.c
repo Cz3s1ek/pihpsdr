@@ -65,8 +65,9 @@ static gboolean making_active = FALSE;
 // PART 1. Functions releated to the receiver display
 //
 
+// cppcheck-suppress constParameterCallback
 static void rx_weak_notify(gpointer data, GObject  *obj) {
-  RECEIVER *rx = (RECEIVER *)data;
+  const RECEIVER *rx = (RECEIVER *)data;
   t_print("%s: id=%d obj=%p\n", __FUNCTION__, rx->id, obj);
 }
 
@@ -873,7 +874,8 @@ RECEIVER *rx_create_receiver(int id, int pixels, int width, int height) {
   // with that of the first  receiver. Different sample rates in
   // the props file may arise due to illegal hand editing or
   // firmware downgrade from P2 to P1. The same applies to
-  // a LIMESDR where we keep both receivers at the same sample rate.
+  // a LIMESDR with 2RX where we keep both receivers
+  // at the same sample rate.
   //
   if ((protocol == ORIGINAL_PROTOCOL || have_lime) && id == 1) {
     rx->sample_rate = receiver[0]->sample_rate;

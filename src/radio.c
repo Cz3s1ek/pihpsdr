@@ -169,8 +169,9 @@ int hl2_cl1_input = 0;
 int anan10E = 0;
 
 int adc0_filter_bypass = 0; // Bypass ADC0 filters on receive
-int adc1_filter_bypass = 0; // Bypass ADC1 filters on receiver  (ANAN-7000/8000/G2)
-int mute_spkr_amp = 0;      // Mute audio amplifier in radio    (ANAN-7000, G2)
+int adc1_filter_bypass = 0; // Bypass ADC1 filters on receiver              (ANAN-7000/8000/G2)
+int mute_spkr_amp = 0;      // Mute audio amplifier in radio                (ANAN-7000, G2)
+int mute_spkr_xmit= 0;      // Mute audio amplifier in radio upon transmit  (ANAN-7000, G2)
 
 int tx_out_of_band_allowed = 0;
 
@@ -258,7 +259,6 @@ int pre_mox = 0;
 
 int ptt = 0;
 int mox = 0;
-int tune = 0;
 int have_rx_gain = 0;
 int have_rx_att = 0;
 int have_alex_att = 0;
@@ -1221,7 +1221,7 @@ void radio_start_radio() {
   //
   if (have_saturn_xdma) {
     for (SaturnSerialPort *ChkSerial = SaturnSerialPortsList; ChkSerial->port != NULL; ChkSerial++) {
-      char *cp = realpath(ChkSerial->port, NULL);
+      const char *cp = realpath(ChkSerial->port, NULL);
 
       if (cp != NULL) {
         SerialPorts[MAX_SERIAL - 1].enable = 1;
@@ -1480,6 +1480,17 @@ void radio_start_radio() {
 
   case SOAPYSDR_USB_DEVICE:
     snprintf(property_path, sizeof(property_path), "%s.props", radio->name);
+    //
+    // The LimeSDR comes in two variants, a full-fledged one with 2RX,
+    // and a LimeSDR-Mini with 1RX. The driver (and thus the radio name)
+    // is "lime" in both cases, but allow them to have distinct props
+    // files. The same may apply to other radios e.g. the Pluto as well,
+    // but for the sake of backwards compatibility this "hook" is currently
+    // only activated for the LIME.
+    //
+    if (have_lime && radio->info.soapy.rx_channels > 1) {
+        snprintf(property_path, sizeof(property_path), "%s-2rx.props", radio->name);
+    }
     break;
 
   default:
@@ -1642,7 +1653,6 @@ void radio_start_radio() {
 
   switch (protocol) {
   case SOAPYSDR_PROTOCOL:
-    t_print("%s: setup RECEIVERS SOAPYSDR\n", __FUNCTION__);
     RECEIVERS = 1;
 
     if (radio->info.soapy.rx_channels > 1) {
@@ -1651,10 +1661,11 @@ void radio_start_radio() {
 
     PS_TX_FEEDBACK = RECEIVERS;
     PS_RX_FEEDBACK = RECEIVERS + 1;
+    t_print("%s: setup %d receivers for SoapySDR\n", __FUNCTION__, RECEIVERS);
     break;
 
   default:
-    t_print("%s: setup RECEIVERS default\n", __FUNCTION__);
+    t_print("%s: default setup for 2 receivers\n", __FUNCTION__);
     RECEIVERS = 2;
     PS_TX_FEEDBACK = (RECEIVERS);
     PS_RX_FEEDBACK = (RECEIVERS + 1);
@@ -1687,6 +1698,7 @@ void radio_start_radio() {
 #ifdef SOAPYSDR
   if (protocol == SOAPYSDR_PROTOCOL) {
     if (!have_lime) {
+      t_print("%s: create %d SOAPY receiver(s)\n", __FUNCTION__, RECEIVERS);
       //
       // LIME: do not start receivers before TX is running
       //       since this starts auto-calibration.
@@ -1698,6 +1710,7 @@ void radio_start_radio() {
     }
 
     if (can_transmit) {
+      t_print("%s: create SOAPY transmitter\n", __FUNCTION__);
       soapy_protocol_create_transmitter(transmitter);
       soapy_protocol_set_tx_antenna(transmitter, dac.antenna);
       //
@@ -1723,14 +1736,28 @@ void radio_start_radio() {
       soapy_protocol_set_rx_frequency(rx, id);
 
       if (have_lime && RECEIVERS == 2) {
+        //
         // LIME: This one has a single (Soapy) receiver with two
         //       channels, so we have to create and start this
-        //       *pair* in a single call
+        //       *pair* in the first pass through this loop
+        //
+        // ATTENTION: this does not apply to a LIME-mini!
+        //
         if (id == 0) {
+          t_print("%s: create and start a dual SOAPY receiver\n", __FUNCTION__);
           soapy_protocol_create_dual_receiver(receiver[0],receiver[1]);
           soapy_protocol_start_dual_receiver(receiver[0],receiver[1]);
         }
       } else {
+        if (have_lime) {
+          //
+          // LIME with 1RX: creating the receiver has been deferred so
+          // we need to do this HERE.
+          //
+          t_print("%s: create 1 SOAPY receiver\n", __FUNCTION__);
+          soapy_protocol_create_receiver(rx);
+        }
+        t_print("%s: start 1 SOAPY receiver\n", __FUNCTION__);
         soapy_protocol_start_receiver(rx);
       }
 
@@ -1742,6 +1769,7 @@ void radio_start_radio() {
         rx_set_frequency(rx, vfo[id].ctun_frequency);
       }
     }
+    t_print("%s: SOAPY init RX stuff completed\n", __FUNCTION__);
   }  // protocol == SOAPYSDR
 #endif
 
@@ -2086,7 +2114,7 @@ static void rxtx(int state) {
             break;
           }
 
-          if (tune) { do_silence = 5; } // 31 ms "silence" for TUNEing in any mode
+          if (transmitter->tune) { do_silence = 5; } // 31 ms "silence" for TUNEing in any mode
         }
       }
 
@@ -2130,26 +2158,30 @@ void radio_toggle_mox() {
 }
 
 void radio_remote_set_vox(int state) {
-  if (state != radio_is_transmitting()) {
-    rxtx(state);
-  }
+  if (can_transmit) {
+    if (state != radio_is_transmitting()) {
+      rxtx(state);
+    }
 
-  mox = 0;
-  tune = 0;
-  vox = state;
-  g_idle_add(ext_vfo_update, NULL);
+    mox = 0;
+    transmitter->tune = 0;
+    vox = state;
+    g_idle_add(ext_vfo_update, NULL);
+  }
 }
 
 void radio_remote_set_mox(int state) {
-  if (state != radio_is_transmitting()) {
-    rxtx(state);
-  }
+  if (can_transmit) {
+    if (state != radio_is_transmitting()) {
+      rxtx(state);
+    }
 
-  vox_cancel();  // remove time-out
-  mox = state;
-  tune = 0;
-  vox = 0;
-  g_idle_add(ext_vfo_update, NULL);
+    vox_cancel();  // remove time-out
+    mox = state;
+    transmitter->tune = 0;
+    vox = 0;
+    g_idle_add(ext_vfo_update, NULL);
+  }
 }
 
 void radio_remote_set_twotone(int state) {
@@ -2161,29 +2193,31 @@ void radio_remote_set_twotone(int state) {
 }
 
 void radio_remote_set_tune(int state) {
-  if (state != tune) {
-    vox_cancel();
+  if (can_transmit) {
+    if (state != transmitter->tune) {
+      vox_cancel();
 
-    if (vox || mox) {
-      rxtx(0);
-      vox = 0;
-      mox = 0;
+      if (vox || mox) {
+        rxtx(0);
+        vox = 0;
+        mox = 0;
+      }
+
+      rxtx(state);
+      transmitter->tune = state;
     }
 
-    rxtx(state);
-    tune = state;
+    g_idle_add(ext_vfo_update, NULL);
   }
-
-  g_idle_add(ext_vfo_update, NULL);
 }
 
 void radio_set_mox(int state) {
-  if (!can_transmit) { return; }
-
   if (radio_is_remote) {
     send_mox(client_socket, state);
     return;
   }
+
+  if (!can_transmit) { return; }
 
   if (state && !TransmitAllowed()) {
     state = 0;
@@ -2198,7 +2232,7 @@ void radio_set_mox(int state) {
   // - activating MOX while VOX is pending continues transmission
   // - deactivating MOX while VOX is pending makes a TX/RX transition
   //
-  if (tune) {
+  if (transmitter->tune) {
     radio_set_tune(0);
   }
 
@@ -2214,7 +2248,7 @@ void radio_set_mox(int state) {
   }
 
   mox  = state;
-  tune = 0;
+  transmitter->tune = 0;
   vox  = 0;
   schedule_high_priority();
   schedule_receive_specific();
@@ -2226,17 +2260,16 @@ int radio_get_mox() {
 }
 
 void radio_set_vox(int state) {
-  //t_print("%s: mox=%d vox=%d tune=%d NewState=%d\n", __FUNCTION__, mox,vox,tune,state);
-  if (!can_transmit) { return; }
-
-  if (mox || tune) { return; }
-
-  if (state && TxInhibit) { return; }
-
   if (radio_is_remote) {
     send_vox(client_socket, state);
     return;
   }
+
+  if (!can_transmit) { return; }
+
+  if (mox || transmitter->tune) { return; }
+
+  if (state && TxInhibit) { return; }
 
   if (vox != state) {
     rxtx(state);
@@ -2264,8 +2297,10 @@ void radio_toggle_tune() {
     return;
   }
 
-  radio_set_tune(!tune);
-  g_idle_add(ext_vfo_update, NULL);
+  if (can_transmit) {
+    radio_set_tune(!transmitter->tune);
+    g_idle_add(ext_vfo_update, NULL);
+  }
 }
 
 void radio_set_tune(int state) {
@@ -2274,13 +2309,12 @@ void radio_set_tune(int state) {
     return;
   }
 
-  //t_print("%s: mox=%d vox=%d tune=%d NewState=%d\n", __FUNCTION__, mox,vox,tune,state);
   if (!can_transmit) { return; }
 
   if (state && TxInhibit) { return; }
 
   // if state==tune, this function is a no-op
-  if (tune != state) {
+  if (transmitter->tune != state) {
     vox_cancel();
 
     if (vox || mox) {
@@ -2415,7 +2449,7 @@ void radio_set_tune(int state) {
         break;
       }
 
-      tune = state;
+      transmitter->tune = state;
       radio_calc_drive_level();
       rxtx(state);
     } else {
@@ -2440,7 +2474,7 @@ void radio_set_tune(int state) {
       }
 
       tx_set_compressor(transmitter);
-      tune = state;
+      transmitter->tune = state;
       radio_calc_drive_level();
     }
   }
@@ -2451,12 +2485,12 @@ void radio_set_tune(int state) {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-int radio_get_tune() {
-  return tune;
-}
-
 int radio_is_transmitting() {
-  return mox | vox | tune;
+  int ret = 0;
+
+  if (can_transmit) { ret = mox | vox | transmitter->tune; }
+
+  return ret;
 }
 
 double radio_get_drive() {
@@ -2493,7 +2527,7 @@ void radio_calc_drive_level() {
 
   if (!can_transmit) { return; }
 
-  if (tune && !transmitter->tune_use_drive) {
+  if (transmitter->tune && !transmitter->tune_use_drive) {
     level = calcLevel(transmitter->tune_drive);
   } else {
     level = calcLevel(transmitter->drive);
@@ -2820,6 +2854,7 @@ static void radio_restore_state() {
     GetPropI0("radio.display_warnings",                      display_warnings);
     GetPropI0("radio.display_pacurr",                        display_pacurr);
     GetPropI0("mute_spkr_amp",                               mute_spkr_amp);
+    GetPropI0("mute_spkr_xmit",                              mute_spkr_xmit);
     GetPropI0("adc0_filter_bypass",                          adc0_filter_bypass);
     GetPropI0("adc1_filter_bypass",                          adc1_filter_bypass);
 #ifdef SATURN
@@ -3019,6 +3054,7 @@ void radio_save_state() {
     SetPropI0("radio.display_warnings",                      display_warnings);
     SetPropI0("radio.display_pacurr",                        display_pacurr);
     SetPropI0("mute_spkr_amp",                               mute_spkr_amp);
+    SetPropI0("mute_spkr_xmit",                              mute_spkr_xmit);
     SetPropI0("adc0_filter_bypass",                          adc0_filter_bypass);
     SetPropI0("adc1_filter_bypass",                          adc1_filter_bypass);
 #ifdef SATURN

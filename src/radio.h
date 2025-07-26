@@ -202,7 +202,6 @@ extern int penelope_software_version;
 extern int ptt;
 extern int mox;
 extern int pre_mox;
-extern int tune;
 extern int memory_tune;
 extern int full_tune;
 
@@ -276,6 +275,7 @@ extern int anan10E;
 extern int adc0_filter_bypass;   // Bypass ADC0 filters on receive
 extern int adc1_filter_bypass;   // Bypass ADC1 filters on receiver  (ANAN-7000/8000/G2)
 extern int mute_spkr_amp;        // Mute audio amplifier in radio    (ANAN-7000, G2)
+extern int mute_spkr_xmit;       // Mute audio amplifier in radio upon transmitting (ANAN-7000, G2)
 
 extern int VFO_WIDTH;
 extern int VFO_HEIGHT;
@@ -312,7 +312,6 @@ extern void   radio_set_mox(int state);
 extern void   radio_set_twotone(TRANSMITTER *tx, int state);
 extern int    radio_get_mox(void);
 extern void   radio_set_tune(int state);
-extern int    radio_get_tune(void);
 extern void   radio_set_vox(int state);
 extern double radio_get_drive(void);
 extern void   radio_set_drive(double d);

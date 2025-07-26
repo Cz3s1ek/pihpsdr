@@ -84,6 +84,9 @@ typedef struct _transmitter {
   int out_of_band;
   guint out_of_band_timer_id;
 
+  int tune;
+  int swrtune;            // produce SWR-dependent side tone while TUNE-ing
+  double swrtune_volume;  // Volume of SWR-dependent side tone (1-127)
   int twotone;
   int puresignal;
   int feedback;
@@ -168,6 +171,7 @@ typedef struct _transmitter {
   int display_filled;
 
   double *cw_sig_rf;      // contains the CW RF envelope
+  int    *p1stone;        // contains side tone (CW or TUNE), only used in P1
 
   int cw_ramp_audio_len;  // ramp width in samples
   int cw_ramp_audio_ptr;

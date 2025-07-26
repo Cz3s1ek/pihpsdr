@@ -745,7 +745,7 @@ static void new_protocol_high_priority() {
       // radio reports a PTT signal, since only then we can use
       // a foot-switch to extend the TX time in a rag-chew QSO
       //
-      if (tune || CAT_cw_is_active
+      if (transmitter->tune || CAT_cw_is_active
           || MIDI_cw_is_active
           || !cw_keyer_internal
           || transmitter->twotone
@@ -882,7 +882,7 @@ static void new_protocol_high_priority() {
   if (xmit) {
     high_priority_buffer_to_radio[1401] = txband->OCtx << 1;
 
-    if (tune) {
+    if (transmitter->tune) {
       if (full_tune || memory_tune) {
         struct timeval te;
         gettimeofday(&te, NULL);
@@ -914,7 +914,16 @@ static void new_protocol_high_priority() {
       high_priority_buffer_to_radio[1400] |= ANAN7000_HIPRIO1400_XVTR_OUT;
     }
 
-    if (mute_spkr_amp) {
+    //
+    // On ANAN-7000 and G2, one can "mute" the stereo amplifier. This affects speakers,
+    // headphone, and LineOut. Some have reported that distorted audio goes to the speakers
+    // upon transmit, so there is an option to mute the amplifier during TX only.
+    // However, if we expect a side tone from CW or TUNEing, "mute when tx" is ignored.
+    // Note that "Mute when TX" is not generally recommended, since the
+    // speakers emit a notable "pop" when the amp is switched on or off.
+    //
+    if (mute_spkr_amp ||
+        (mute_spkr_xmit && xmit && (txmode != modeCWL) && (txmode != modeCWU) && !transmitter->tune)) {
       //
       // Mute the amplifier of the built-in speakers
       //
@@ -2176,7 +2185,7 @@ void saturn_post_iq_data(int ddc, mybuffer *mybuf) {
                            + (buffer[3] & 0xFF);
 
   if (ddc_sequence[ddc] != sequence) {
-    t_print("%s: DDC(%d) sequence error: expected %ld got %ld\n", __FUNCTION__, ddc, ddc_sequence[ddc], sequence);
+    t_print("%s: DDC(%d) sequence error: expected %lu got %lu\n", __FUNCTION__, ddc, ddc_sequence[ddc], sequence);
     sequence_errors++;
   }
 
@@ -2465,7 +2474,7 @@ static void process_high_priority() {
   sequence = ((buffer[0] & 0xFF) << 24) + ((buffer[1] & 0xFF) << 16) + ((buffer[2] & 0xFF) << 8) + (buffer[3] & 0xFF);
 
   if (sequence != highprio_rcvd_sequence) {
-    t_print("HighPrio SeqErr Expected=%ld Seen=%ld\n", highprio_rcvd_sequence, sequence);
+    t_print("HighPrio SeqErr Expected=%lu Seen=%lu\n", highprio_rcvd_sequence, sequence);
     highprio_rcvd_sequence = sequence;
     sequence_errors++;
   }
@@ -2589,7 +2598,7 @@ static void process_mic_data(const unsigned char *buffer) {
   sequence = ((buffer[0] & 0xFF) << 24) + ((buffer[1] & 0xFF) << 16) + ((buffer[2] & 0xFF) << 8) + (buffer[3] & 0xFF);
 
   if (sequence != micsamples_sequence) {
-    t_print("MicSample SeqErr Expected=%ld Seen=%ld\n", micsamples_sequence, sequence);
+    t_print("MicSample SeqErr Expected=%lu Seen=%lu\n", micsamples_sequence, sequence);
     sequence_errors++;
   }
 
@@ -2606,9 +2615,9 @@ static void process_mic_data(const unsigned char *buffer) {
 void new_protocol_cw_audio_samples(short left_audio_sample, short right_audio_sample) {
   int txmode = vfo_get_tx_mode();
 
-  if (radio_is_transmitting() && (txmode == modeCWU || txmode == modeCWL)) {
+  if (radio_is_transmitting() && (txmode == modeCWU || txmode == modeCWL || (transmitter->tune && transmitter->swrtune))) {
     //
-    // Only process samples if transmitting in CW
+    // Only process samples if there can be a sidetone
     //
     pthread_mutex_lock(&send_rxaudio_mutex);
 
@@ -2669,9 +2678,9 @@ void new_protocol_audio_samples(short left_audio_sample, short right_audio_sampl
   int txmode = vfo_get_tx_mode();
 
   //
-  // Only process samples if NOT transmitting in CW
+  // Only process samples if there can be no sidetone
   //
-  if (radio_is_transmitting() && (txmode == modeCWU || txmode == modeCWL)) { return; }
+  if (radio_is_transmitting() && (txmode == modeCWU || txmode == modeCWL || (transmitter->tune && transmitter->swrtune))) { return; }
 
   pthread_mutex_lock(&send_rxaudio_mutex);
 
