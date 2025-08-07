@@ -63,7 +63,7 @@
 #include "vfo.h"
 
 #ifdef __APPLE__
-#include "MacTTS.h"
+  #include "MacTTS.h"
 #endif
 
 //
@@ -72,6 +72,7 @@
 //
 void tts_send(char *msg) {
   int sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
   if (sock >= 0) {
     int optval = 1;
     struct sockaddr_in addr;
@@ -86,6 +87,7 @@ void tts_send(char *msg) {
     sendto(sock, msg, strlen(msg), 0, (struct sockaddr * ) &addr, sizeof(addr));
     close(sock);
   }
+
 #ifdef __APPLE__
   MacTTS(msg);
 #endif
@@ -227,14 +229,8 @@ void tts_atten() {
   char msg[128];
   int level = adc[active_receiver->adc].attenuation - adc[active_receiver->adc].gain;
 
-  if (filter_board == CHARLY25 && active_receiver->adc == 0) {
-    level += 12 * active_receiver->alex_attenuation
-             - 18 * active_receiver->preamp
-             - 18 * active_receiver->dither;
-  }
-
   if (filter_board == ALEX && active_receiver->adc == 0) {
-    level += 10 * active_receiver->alex_attenuation;
+    level += 10 * adc[0].alex_attenuation - 20 * adc[0].preamp;
   }
 
   // If level is < 0, this is gain
