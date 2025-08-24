@@ -90,16 +90,16 @@
 #define min(x,y) (x<y?x:y)
 #define max(x,y) (x<y?y:x)
 
-int MENU_HEIGHT = 30;             // always set to VFO_HEIGHT/2
-int MENU_WIDTH = 65;              // nowhere changed
+const int MIN_METER_WIDTH = 200;  // nowhere changed
+const int MENU_WIDTH = 65;        // nowhere changed
+
 int VFO_HEIGHT = 60;              // taken from the current VFO bar layout
 int VFO_WIDTH = 530;              // taken from the current VFO bar layout
-const int MIN_METER_WIDTH = 200;  // nowhere changed
-int METER_HEIGHT = 60;            // always set to  VFO_HEIGHT
 int METER_WIDTH = 200;            // dynamically set in choose_vfo_layout
-int ZOOMPAN_HEIGHT = 50;
-int SLIDERS_HEIGHT = 100;
-int TOOLBAR_HEIGHT = 30;
+
+static int ZOOMPAN_HEIGHT = 50;   // dynamically adjusted to the display height
+static int SLIDERS_HEIGHT = 100;  // dynamically adjusted to the display height
+static int TOOLBAR_HEIGHT = 30;   // dynamically adjusted to the display height
 
 int rx_stack_horizontal = 0;
 int suppress_popup_sliders = 0;
@@ -563,7 +563,7 @@ static void choose_vfo_layout() {
   }
 
   METER_WIDTH = MIN_METER_WIDTH;
-  VFO_WIDTH = full_screen ? screen_width : display_width;
+  VFO_WIDTH = display_width[display_size];
   VFO_WIDTH -= (MENU_WIDTH + METER_WIDTH);
 
   //
@@ -618,8 +618,8 @@ static int set_full_screen(gpointer data) {
     // FullScreen to window transition. Place window in the center of the screen
     //
     gtk_window_move(GTK_WINDOW(top_window),
-                    (screen_width - display_width) / 2,
-                    (screen_height - display_height) / 2);
+                    (display_width[0] - display_width[display_size]) / 2,
+                    (display_height[0] - display_height[display_size]) / 2);
   }
 
   return G_SOURCE_REMOVE;
@@ -629,7 +629,7 @@ void radio_reconfigure_screen() {
   GdkWindow *gw = gtk_widget_get_window(top_window);
   GdkWindowState ws = gdk_window_get_state(GDK_WINDOW(gw));
   int last_fullscreen = SET(ws & GDK_WINDOW_STATE_FULLSCREEN);
-  int my_fullscreen = SET(full_screen);  // this will not change during this procedure
+  int my_fullscreen = SET(display_size == 0);  // this will not change during this procedure
 
   if (last_fullscreen != my_fullscreen) {
     if (full_screen_timeout > 0) {
@@ -643,8 +643,8 @@ void radio_reconfigure_screen() {
   // Start with removing the toolbar, the slider area and the zoom/pan area
   // (these will be re-constructed in due course)
   //
-  int my_width  = my_fullscreen ? screen_width  : display_width;
-  int my_height = my_fullscreen ? screen_height : display_height;
+  int my_width  = display_width[display_size];
+  int my_height = display_height[display_size];
 
   if (toolbar) {
     gtk_container_remove(GTK_CONTAINER(fixed), toolbar);
@@ -663,8 +663,6 @@ void radio_reconfigure_screen() {
 
   choose_vfo_layout();
   VFO_HEIGHT = vfo_layout_list[vfo_layout].height;
-  MENU_HEIGHT = VFO_HEIGHT / 2;
-  METER_HEIGHT = VFO_HEIGHT;
 
   //
   // If there is enough space, increase the meter width
@@ -685,7 +683,7 @@ void radio_reconfigure_screen() {
     full_screen_timeout = g_timeout_add(1000, set_full_screen, GINT_TO_POINTER(0));
   }
 
-  if (last_fullscreen != full_screen && my_fullscreen) {
+  if (last_fullscreen != SET(display_size == 0) && my_fullscreen) {
     //
     // A window-to-fullscreen transition
     // here we move the window, the transition is then
@@ -695,15 +693,15 @@ void radio_reconfigure_screen() {
   }
 
   gtk_window_resize(GTK_WINDOW(top_window), my_width, my_height);
-  gtk_widget_set_size_request(hide_b, MENU_WIDTH, MENU_HEIGHT);
-  gtk_widget_set_size_request(menu_b, MENU_WIDTH, MENU_HEIGHT);
-  gtk_widget_set_size_request(meter,  METER_WIDTH, METER_HEIGHT);
+  gtk_widget_set_size_request(hide_b, MENU_WIDTH, VFO_HEIGHT / 2);
+  gtk_widget_set_size_request(menu_b, MENU_WIDTH, VFO_HEIGHT / 2);
+  gtk_widget_set_size_request(meter,  METER_WIDTH, VFO_HEIGHT);
   gtk_widget_set_size_request(vfo_panel, VFO_WIDTH, VFO_HEIGHT);
   //
   // Move Hide and Menu buttons, meter to new position
   //
   gtk_fixed_move(GTK_FIXED(fixed), hide_b, VFO_WIDTH + METER_WIDTH, 0);
-  gtk_fixed_move(GTK_FIXED(fixed), menu_b, VFO_WIDTH + METER_WIDTH, MENU_HEIGHT);
+  gtk_fixed_move(GTK_FIXED(fixed), menu_b, VFO_WIDTH + METER_WIDTH, VFO_HEIGHT / 2);
   gtk_fixed_move(GTK_FIXED(fixed), meter, VFO_WIDTH, 0);
 
   //
@@ -736,8 +734,8 @@ void radio_reconfigure() {
   int i;
   int y;
   t_print("%s: receivers=%d\n", __FUNCTION__, receivers);
-  int my_height = full_screen ? screen_height : display_height;
-  int my_width  = full_screen ? screen_width  : display_width;
+  int my_height = display_height[display_size];
+  int my_width  = display_width[display_size];
   rx_height = my_height - VFO_HEIGHT;
 
   //
@@ -925,25 +923,25 @@ static void radio_create_visual() {
   g_object_ref(topgrid);  // so it does not get deleted
   gtk_container_remove(GTK_CONTAINER(top_window), topgrid);
   gtk_container_add(GTK_CONTAINER(top_window), fixed);
-  int my_height = full_screen ? screen_height : display_height;
-  int my_width  = full_screen ? screen_width  : display_width;
+  int my_height = display_height[display_size];
+  int my_width  = display_width[display_size];
   VFO_WIDTH = my_width - MENU_WIDTH - METER_WIDTH;
   vfo_panel = vfo_init(VFO_WIDTH, VFO_HEIGHT);
   gtk_fixed_put(GTK_FIXED(fixed), vfo_panel, 0, y);
-  meter = meter_init(METER_WIDTH, METER_HEIGHT);
+  meter = meter_init(METER_WIDTH, VFO_HEIGHT);
   gtk_fixed_put(GTK_FIXED(fixed), meter, VFO_WIDTH, y);
   hide_b = gtk_button_new_with_label("Hide");
   gtk_widget_set_name(hide_b, "boldlabel");
-  gtk_widget_set_size_request (hide_b, MENU_WIDTH, MENU_HEIGHT);
+  gtk_widget_set_size_request (hide_b, MENU_WIDTH, VFO_HEIGHT / 2);
   g_signal_connect(hide_b, "button-press-event", G_CALLBACK(hideall_cb), NULL);
   gtk_fixed_put(GTK_FIXED(fixed), hide_b, VFO_WIDTH + METER_WIDTH, y);
-  y += MENU_HEIGHT;
+  y += VFO_HEIGHT / 2;
   menu_b = gtk_button_new_with_label("Menu");
   gtk_widget_set_name(menu_b, "boldlabel");
-  gtk_widget_set_size_request (menu_b, MENU_WIDTH, MENU_HEIGHT);
+  gtk_widget_set_size_request (menu_b, MENU_WIDTH, VFO_HEIGHT / 2);
   g_signal_connect (menu_b, "button-press-event", G_CALLBACK(menu_cb), NULL) ;
   gtk_fixed_put(GTK_FIXED(fixed), menu_b, VFO_WIDTH + METER_WIDTH, y);
-  y += MENU_HEIGHT;
+  y += VFO_HEIGHT / 2;
   rx_height = my_height - VFO_HEIGHT;
 
   if (display_zoompan) {
@@ -3028,7 +3026,7 @@ static void radio_restore_state() {
   GetPropI0("display_zoompan",                               display_zoompan);
   GetPropI0("display_sliders",                               display_sliders);
   GetPropI0("display_toolbar",                               display_toolbar);
-  GetPropI0("display_height",                                display_height);
+  GetPropI0("display_height",                                display_height[1]);
   GetPropI0("vfo_layout",                                    vfo_layout);
   GetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   GetPropI0("which_css_font",                                which_css_font);
@@ -3046,9 +3044,9 @@ static void radio_restore_state() {
   GetPropI0("tci_txonly",                                    tci_txonly);
 
   if (!radio_is_remote) {
-    GetPropI0("full_screen",                                 full_screen);
     GetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    GetPropI0("display_width",                               display_width);
+    GetPropI0("display_size",                                display_size);
+    GetPropI0("display_width",                               display_width[1]);
     GetPropI0("enable_auto_tune",                            enable_auto_tune);
     GetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     GetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);
@@ -3155,18 +3153,25 @@ static void radio_restore_state() {
   // (GDK_GRAVITY_NORTH_WEST) where the "position" refers to the top left corner
   // of the window.
   //
-  if ((window_x_pos < screen_width - 100) && (window_y_pos < screen_height - 100)) {
+  if ((window_x_pos < display_width[0] - 100) && (window_y_pos < display_height[0] - 100)) {
     gtk_window_move(GTK_WINDOW(top_window), window_x_pos, window_y_pos);
   }
 
   //
   if (!radio_is_remote) {
     //
-    // Assert that the screen dimensions fit within the display
+    // Assert that the custom size does not exceed the screen size
     //
-    if (display_width  > screen_width  ) { display_width  = screen_width; }
-
-    if (display_height > screen_height ) { display_height = screen_height; }
+    if ((display_width[1] > display_width[0]) || (display_height[1] > display_height[0])) {
+      display_width[1] = 640;
+      display_height[1] = 400;
+    }
+    //
+    // Assert that a standard size from the props file does not exceed the screen size
+    //
+    if ((display_width[display_size]  > display_width[0]) || (display_height[display_size] > display_height[0])) {
+      display_size = 1;
+    }
   }
 
   //
@@ -3175,7 +3180,7 @@ static void radio_restore_state() {
   // (GDK_GRAVITY_NORTH_WEST) where the "position" refers to the top left corner
   // of the window.
   //
-  if ((window_x_pos < screen_width - 100) && (window_y_pos < screen_height - 100)) {
+  if ((window_x_pos < display_width[0] - 100) && (window_y_pos < display_height[0] - 100)) {
     gtk_window_move(GTK_WINDOW(top_window), window_x_pos, window_y_pos);
   }
 
@@ -3231,7 +3236,7 @@ void radio_save_state() {
   SetPropI0("display_zoompan",                               hide_status ? old_zoom : display_zoompan);
   SetPropI0("display_sliders",                               hide_status ? old_slid : display_sliders);
   SetPropI0("display_toolbar",                               hide_status ? old_tool : display_toolbar);
-  SetPropI0("display_height",                                display_height);
+  SetPropI0("display_height",                                display_height[1]);
   SetPropI0("vfo_layout",                                    vfo_layout);
   SetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   SetPropI0("which_css_font",                                which_css_font);
@@ -3249,9 +3254,9 @@ void radio_save_state() {
   SetPropI0("tci_txonly",                                    tci_txonly);
 
   if (!radio_is_remote) {
-    SetPropI0("full_screen",                                 full_screen);
     SetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    SetPropI0("display_width",                               display_width);
+    SetPropI0("display_size",                                display_size);
+    SetPropI0("display_width",                               display_width[1]);
     SetPropI0("enable_auto_tune",                            enable_auto_tune);
     SetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     SetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);

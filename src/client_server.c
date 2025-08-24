@@ -875,6 +875,7 @@ void send_radio_data(int sock) {
   data.soapy_tx_channels = radio->soapy.tx_channels;
   data.soapy_rx1_has_automatic_gain = radio->soapy.rx[0].has_automatic_gain;
   data.soapy_rx2_has_automatic_gain = radio->soapy.rx[1].has_automatic_gain;
+  data.display_size = display_size;
   //
   memcpy(data.soapy_hardware_key, radio->soapy.hardware_key, 64);
   memcpy(data.soapy_driver_key, radio->soapy.driver_key, 64);
@@ -910,7 +911,7 @@ void send_radio_data(int sock) {
   data.cw_keyer_sidetone_frequency = to_short(cw_keyer_sidetone_frequency);
   data.rx_gain_calibration = to_short(rx_gain_calibration);
   data.device = to_short(device);
-  data.display_width = to_short(display_width);
+  data.display_width = to_short(display_width[1]);
   //
   data.drive_min = to_double(drive_min);
   data.drive_max = to_double(drive_max);
@@ -1717,6 +1718,10 @@ void send_meter(int s, int metermode, int alcmode) {
 }
 
 void send_screen(int s, int hstack, int width) {
+//
+// The client sends this, if its screen size or the RX stacking
+// has changed. The server needs to re-init the WDSP analyzers
+//
   HEADER header;
   SYNC(header.sync);
   header.data_type = to_short(CMD_SCREEN);
@@ -2612,6 +2617,16 @@ static void *listen_thread(void *arg) {
       g_idle_add(ext_set_mox, GINT_TO_POINTER(0));
       remoteclient.running = TRUE;
 
+      //
+      // In order to be prepeared for varying screen dimensions,
+      // we switch the display to "custom" geometry.
+      //
+      display_width[1] = display_width[display_size];
+      display_height[1] = display_height[display_size];
+      display_size = 1;
+      rx_stack_horizontal = 0;
+      radio_reconfigure_screen();
+
       for (int id = 0; id < RECEIVERS; id++) {
         remoteclient.send_rx_spectrum[id] = FALSE;
       }
@@ -3045,6 +3060,7 @@ static void *client_thread(void* arg) {
       radio->soapy.tx_channels = data.soapy_tx_channels;
       radio->soapy.rx[0].has_automatic_gain = data.soapy_rx1_has_automatic_gain;
       radio->soapy.rx[1].has_automatic_gain = data.soapy_rx2_has_automatic_gain;
+      display_size = data.display_size;
       //
       memcpy(radio->soapy.hardware_key, data.soapy_hardware_key, 64);
       memcpy(radio->soapy.driver_key, data.soapy_driver_key, 64);
@@ -3080,7 +3096,7 @@ static void *client_thread(void* arg) {
       cw_keyer_sidetone_frequency = from_short(data.cw_keyer_sidetone_frequency);
       rx_gain_calibration = from_short(data.rx_gain_calibration);
       device = radio->device = from_short(data.device);
-      display_width = from_short(data.display_width);
+      display_width[1] = from_short(data.display_width);
       //
       drive_min = from_double(data.drive_min);
       drive_max = from_double(data.drive_max);
@@ -3952,7 +3968,8 @@ static int remote_command(void *data) {
 
   case CMD_SCREEN: {
     rx_stack_horizontal = header->b1;
-    display_width = from_short(header->s1);
+    display_size = 1;
+    display_width[1] = from_short(header->s1);
     radio_reconfigure_screen();
   }
   break;
