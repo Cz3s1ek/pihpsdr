@@ -78,6 +78,7 @@ enum _header_type_enum {
   CMD_RCL,
   CMD_RECEIVERS,
   CMD_REGION,
+  CMD_RESTART,
   CMD_RFGAIN,
   CMD_RIT,
   CMD_RIT_STEP,
@@ -139,9 +140,9 @@ enum _header_type_enum {
   CLIENT_SERVER_COMMANDS,
 };
 
-#define CLIENT_SERVER_VERSION 0x01000014 // 32-bit version number
+#define CLIENT_SERVER_VERSION 0x01000019 // 32-bit version number
 #define SPECTRUM_DATA_SIZE 4096          // Maximum width of a panadapter
-#define AUDIO_DATA_SIZE 1024             // 1024 stereo samples
+#define AUDIO_DATA_SIZE 512              // 512 stereo samples
 
 typedef struct _remote_client {
   int running;
@@ -368,7 +369,6 @@ typedef struct __attribute__((__packed__)) _radio_data {
   uint8_t  soapy_tx_channels;
   uint8_t  soapy_rx1_has_automatic_gain;
   uint8_t  soapy_rx2_has_automatic_gain;
-  uint8_t  display_size;
   //
   char     soapy_hardware_key[64];
   char     soapy_driver_key[64];
@@ -385,7 +385,6 @@ typedef struct __attribute__((__packed__)) _radio_data {
   uint16_t cw_keyer_sidetone_frequency;
   uint16_t rx_gain_calibration;
   uint16_t device;
-  uint16_t display_width;
   //
   mydouble drive_min;
   mydouble drive_max;
@@ -566,15 +565,18 @@ typedef struct __attribute__((__packed__)) _receiver_data {
   uint8_t eq_enable;
   uint8_t smetermode;
   uint8_t low_latency;
+  uint8_t pan;
   //
   uint16_t fps;
   uint16_t filter_low;
   uint16_t filter_high;
   uint16_t deviation;
-  uint16_t pan;
   uint16_t width;
   //
-  mydouble hz_per_pixel;
+  mydouble cA;
+  mydouble cB;
+  mydouble cAp;
+  mydouble cBp;
   mydouble squelch;
   mydouble display_average_time;
   mydouble volume;
@@ -640,9 +642,8 @@ typedef struct __attribute__((__packed__)) _vfo_data {
 typedef struct __attribute__((__packed__)) _spectrum_data {
   HEADER header;
   uint8_t id;
-  uint8_t zoom;
+  uint8_t avail;
   uint16_t width;
-  uint16_t pan;
   //
   uint64_t vfo_a_freq;
   uint64_t vfo_b_freq;
@@ -655,6 +656,10 @@ typedef struct __attribute__((__packed__)) _spectrum_data {
   mydouble alc;
   mydouble fwd;
   mydouble swr;
+  mydouble cA;
+  mydouble cB;
+  mydouble cAp;
+  mydouble cBp;
   //
   uint8_t sample[SPECTRUM_DATA_SIZE];
 } SPECTRUM_DATA;
@@ -801,6 +806,7 @@ typedef struct __attribute__((__packed__)) _noise_command {
 
 #define HPSDR_PWD_LEN 64
 extern int hpsdr_server;
+extern int server_stops_protocol;
 extern char hpsdr_pwd[HPSDR_PWD_LEN];
 
 extern int client_socket;
@@ -819,8 +825,8 @@ extern int radio_connect_remote(char *host, int port, const char *pwd);
 extern void remote_rxaudio(const RECEIVER *rx, short left_sample, short right_sample);
 extern void server_tx_audio(short sample);
 extern short remote_get_mic_sample();
-extern void  remote_send_rxspectrum(int id);
-extern void  remote_send_txspectrum(void);
+extern void  send_rxspectrum(int id);
+extern void  send_txspectrum(void);
 
 extern void send_adc(int s, int id, int adc);
 extern void send_adc_data(int sock, int i);
@@ -878,9 +884,11 @@ extern void send_recall(int s, int index);
 extern void send_receiver_data(int sock, int rx);
 extern void send_receivers(int s, int receivers);
 extern void send_region(int s, int region);
+extern void send_restart(int s);
 extern void send_rfgain(int s, int rx, double gain);
 extern void send_rit(int s, int id);
 extern void send_rit_step(int s, int v, int step);
+extern void send_rx_data(int s, int id);
 extern void send_rx_fft(int s, const RECEIVER *rx);
 extern void send_rx_select(int s, int rx);
 extern void send_rxmenu(int s, int id);
@@ -893,6 +901,7 @@ extern void send_soapy_txant(int s);
 extern void send_soapy_agc(int s, int id);
 extern void send_split(int s, int state);
 extern void send_squelch(int s, int rx, int enable, double squelch);
+extern void send_start_radio(int s);
 extern void send_startstop_rxspectrum(int s, int id, int state);
 extern void send_startstop_txspectrum(int s, int state);
 extern void send_store(int s, int index);
@@ -902,6 +911,7 @@ extern void send_toggle_tune(int s);
 extern void send_tune(int s, int state);
 extern void send_twotone(int s, int state);
 extern void send_tx_compressor(int s);
+extern void send_tx_data(int s);
 extern void send_tx_fft(int s, const TRANSMITTER *tx);
 extern void send_txfilter(int s);
 extern void send_txmenu(int s);
@@ -910,7 +920,7 @@ extern void send_vfo_atob(int sock);
 extern void send_vfo_btoa(int sock);
 extern void send_vfo_data(int sock, int v);
 extern void send_vfo_frequency(int s, int v, long long hz);
-extern void send_vfo_move_to(int s, int v, long long hz);
+extern void send_vfo_move_to(int s, int v, long long hz, int round);
 extern void send_vfo_step(int s, int v, int steps);
 extern void send_vfo_stepsize(int s, int v, int stepsize);
 extern void send_vfo_swap(int sock);
@@ -922,4 +932,81 @@ extern void send_zoom(int s, const RECEIVER *rx);
 extern void update_vfo_move(int v, long long hz, int round);
 extern void update_vfo_step(int v, int steps);
 
+extern int recv_bytes(int s, char *buffer, int bytes);
+extern int send_bytes(int s, char *buffer, int bytes);
+extern void generate_pwd_hash(unsigned char *s, unsigned char *hash, const char *pwd);
+//
+// htonll and friends are macros, and this may have
+// side effects. Better use functions that operate
+// on simple variables (not expressions).
+// Futhermore, explicit casting is done here once for all
+//
+
+static inline uint64_t to_double(double x) {
+  uint64_t u64 = (x + 9.0E8) * 1.0E10;
+#ifdef __APPLE__
+  uint64_t ret = htonll(u64);
+#else
+  uint64_t ret = htobe64(u64);
+#endif
+  return ret;
+}
+
+static inline uint64_t to_ll(long long x) {
+#ifdef __APPLE__
+  uint64_t ret = htonll(x);
+#else
+  uint64_t ret = htobe64(x);
+#endif
+  return ret;
+}
+
+static inline uint32_t to_int(int x) {
+  int32_t s32 = x;
+  uint32_t ret = htonl(s32);
+  return ret;
+}
+
+static inline uint16_t to_short(int x) {
+  int16_t s16 = x;
+  uint16_t ret = htons(s16);
+  return ret;
+}
+
+static inline double from_double(uint64_t y) {
+#ifdef __APPLE__
+  uint64_t u64 = ntohll(y);
+#else
+  uint64_t u64 = be64toh(y);
+#endif
+  return (1.0E-10 * u64 - 9.0E8);
+}
+
+static inline long long from_ll(uint64_t y) {
+#ifdef __APPLE__
+  uint64_t u64 = ntohll(y);
+#else
+  uint64_t u64 = be64toh(y);
+#endif
+  return (long long) u64;
+}
+
+static inline int from_int(uint32_t y) {
+  int32_t s32 = ntohl(y);
+  return (int) s32;
+}
+
+static inline int from_short(uint16_t y) {
+  int16_t s16 = ntohs(y);
+  return (int) s16;
+}
+
+static const uint8_t syncbytes[4] = { 0xFA, 0xFA, 0xAF, 0xAF };
+
+static inline void SYNC(uint8_t *sync) {
+  *sync++ = 0xFA;
+  *sync++ = 0xFA;
+  *sync++ = 0xAF;
+  *sync++ = 0xAF;
+}
 #endif

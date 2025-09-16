@@ -1,5 +1,4 @@
 /* Copyright (C)
-* 2020 - John Melton, G0ORX/N6LYT
 * 2025 - Christoph van Wüllen, DL1YCF
 *
 *   This program is free software: you can redistribute it and/or modify
@@ -18,12 +17,4 @@
 */
 
 #include <gtk/gtk.h>
-
-extern GtkWidget *zoompan_init(int my_width, int my_height);
-extern int zoompan_active_receiver_changed(void *data);
-
-extern void set_pan(int rx, double value);
-extern void set_zoom(int rx, double value);
-
-extern void remote_set_pan(int rx, double value);
-extern void remote_set_zoom(int rx, double value);
+void sliders_menu(GtkWidget *parent);

@@ -114,6 +114,8 @@ struct _mode_settings {
   double nr4_noise_rescale;
   double nr4_post_threshold;
 #endif
+  int squelch_enable;               // Squelch on/off
+  double squelch;                   // squelch value
   int anf;                          // Automatic notch filter
   int snb;                          // Spectral noise blanker
   int agc;                          // AGC characteristics (slow/medium/fast etc.)
@@ -172,10 +174,8 @@ extern void       vfo_step(int steps);
 extern void       vfo_id_step(int id, int steps);
 extern void       vfo_set_rit_step(int step);
 extern void       vfo_id_set_rit_step(int id, int step);
-extern void       vfo_move(long long hz, int round);
 extern void       vfo_id_move(int id, long long hz, int round);
-extern void       vfo_id_move_to(int id, long long hz);
-extern void       vfo_move_to(long long hz);
+extern void       vfo_id_move_to(int id, long long hz, int round);
 extern void       vfo_update(void);
 extern void       vfo_save_state(void);
 extern void       vfo_restore_state(void);

@@ -53,11 +53,13 @@ static int my_rx_stack_horizontal;
 //
 static int apply(gpointer data) {
   apply_timeout = 0;
-  display_width[1]    = my_display_width;
-  display_height[1]   = my_display_height;
-  display_size        = my_display_size;
-  vfo_layout          = my_vfo_layout;
-  rx_stack_horizontal = my_rx_stack_horizontal;
+  //
+  display_width[1]             = my_display_width;
+  display_height[1]            = my_display_height;
+  display_size                 = my_display_size;
+  display_vfobar[display_size] = my_vfo_layout;
+  rx_stack_horizontal          = my_rx_stack_horizontal;
+  //
   radio_reconfigure_screen();
 
   if (radio_is_remote) {
@@ -68,13 +70,10 @@ static int apply(gpointer data) {
   // VFO layout may have been re-adjusted so update combo-box
   // (without letting it emit a signal)
   //
-  if (vfo_layout != my_vfo_layout) {
-    my_vfo_layout = vfo_layout;
-    g_signal_handler_block(G_OBJECT(vfo_b), vfo_signal_id);
-    gtk_combo_box_set_active(GTK_COMBO_BOX(vfo_b), my_vfo_layout);
-    g_signal_handler_unblock(G_OBJECT(vfo_b), vfo_signal_id);
-  }
-
+  my_vfo_layout = display_vfobar[my_display_size];
+  g_signal_handler_block(G_OBJECT(vfo_b), vfo_signal_id);
+  gtk_combo_box_set_active(GTK_COMBO_BOX(vfo_b), my_vfo_layout);
+  g_signal_handler_unblock(G_OBJECT(vfo_b), vfo_signal_id);
   return G_SOURCE_REMOVE;
 }
 
@@ -110,6 +109,10 @@ static void font_cb(GtkWidget *widget, gpointer data) {
 
 static void size_cb(GtkWidget *widget, gpointer data) {
   my_display_size = gtk_combo_box_get_active (GTK_COMBO_BOX(widget));
+  my_vfo_layout = display_vfobar[my_display_size];
+  g_signal_handler_block(G_OBJECT(vfo_b), vfo_signal_id);
+  gtk_combo_box_set_active(GTK_COMBO_BOX(vfo_b), my_vfo_layout);
+  g_signal_handler_unblock(G_OBJECT(vfo_b), vfo_signal_id);
   gtk_widget_set_sensitive(wide_b, my_display_size == 1);
   gtk_widget_set_sensitive(height_b, my_display_size == 1);
   schedule_apply();
@@ -169,18 +172,13 @@ static void horizontal_cb(GtkWidget *widget, gpointer data) {
   schedule_apply();
 }
 
-static void display_zoompan_cb(GtkWidget *widget, gpointer data) {
-  display_zoompan = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+static void slider_rows_cb(GtkWidget *widget, gpointer data) {
+  slider_rows = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
   schedule_apply();
 }
 
-static void display_sliders_cb(GtkWidget *widget, gpointer data) {
-  display_sliders = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
-  schedule_apply();
-}
-
-static void display_toolbar_cb(GtkWidget *widget, gpointer data) {
-  display_toolbar = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+static void toolbar_rows_cb(GtkWidget *widget, gpointer data) {
+  toolbar_rows = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
   schedule_apply();
 }
 
@@ -198,7 +196,7 @@ void screen_menu(GtkWidget *parent) {
   my_display_width       = display_width[1];
   my_display_height      = display_height[1];
   my_display_size        = display_size;
-  my_vfo_layout          = vfo_layout;
+  my_vfo_layout          = display_vfobar[display_size];
   my_rx_stack_horizontal = rx_stack_horizontal;
   dialog = gtk_dialog_new();
   gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(parent));
@@ -210,7 +208,7 @@ void screen_menu(GtkWidget *parent) {
   g_signal_connect (dialog, "destroy", G_CALLBACK (close_cb), NULL);
   GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
   GtkWidget *grid = gtk_grid_new();
-  gtk_grid_set_column_homogeneous(GTK_GRID(grid), TRUE);
+  gtk_grid_set_column_homogeneous(GTK_GRID(grid), FALSE);
   gtk_grid_set_row_homogeneous(GTK_GRID(grid), TRUE);
   gtk_grid_set_column_spacing (GTK_GRID(grid), 5);
   gtk_grid_set_row_spacing (GTK_GRID(grid), 5);
@@ -294,48 +292,44 @@ void screen_menu(GtkWidget *parent) {
   my_combo_attach(GTK_GRID(grid), vfo_b, col, row, 2, 1);
   vfo_signal_id = g_signal_connect(vfo_b, "changed", G_CALLBACK(vfo_cb), NULL);
   row++;
-  button = gtk_check_button_new_with_label("Stack receivers horizontally");
-  gtk_widget_set_name(button, "boldlabel");
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), my_rx_stack_horizontal);
-  gtk_grid_attach(GTK_GRID(grid), button, 1, row, 2, 1);
-  g_signal_connect(button, "toggled", G_CALLBACK(horizontal_cb), NULL);
-
+  label = gtk_label_new("Slider Rows");
+  gtk_widget_set_name (label, "boldlabel");
+  gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+  button = gtk_spin_button_new_with_range(0.0, 3.0, 1.0);
+  gtk_spin_button_set_value(GTK_SPIN_BUTTON(button), slider_rows);
+  gtk_grid_attach(GTK_GRID(grid), button, 1, row, 1, 1);
+  g_signal_connect(button, "value-changed", G_CALLBACK(slider_rows_cb), NULL);
   row++;
-  GtkWidget *b_display_zoompan = gtk_check_button_new_with_label("Display Zoom/Pan");
-  gtk_widget_set_name (b_display_zoompan, "boldlabel");
-  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (b_display_zoompan), display_zoompan);
-  gtk_widget_show(b_display_zoompan);
-  gtk_grid_attach(GTK_GRID(grid), b_display_zoompan, 0, row, 1, 1);
-  g_signal_connect(b_display_zoompan, "toggled", G_CALLBACK(display_zoompan_cb), NULL);
-  GtkWidget *b_display_sliders = gtk_check_button_new_with_label("Display Sliders");
-  gtk_widget_set_name (b_display_sliders, "boldlabel");
-  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (b_display_sliders), display_sliders);
-  gtk_widget_show(b_display_sliders);
-  gtk_grid_attach(GTK_GRID(grid), b_display_sliders, 1, row, 1, 1);
-  g_signal_connect(b_display_sliders, "toggled", G_CALLBACK(display_sliders_cb), NULL);
-  GtkWidget *b_display_toolbar = gtk_check_button_new_with_label("Display Toolbar");
-  gtk_widget_set_name (b_display_toolbar, "boldlabel");
-  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (b_display_toolbar), display_toolbar);
-  gtk_widget_show(b_display_toolbar);
-  gtk_grid_attach(GTK_GRID(grid), b_display_toolbar, 2, row, 1, 1);
-  g_signal_connect(b_display_toolbar, "toggled", G_CALLBACK(display_toolbar_cb), NULL);
+  label = gtk_label_new("Toolbar Rows");
+  gtk_widget_set_name (label, "boldlabel");
+  gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+  button = gtk_spin_button_new_with_range(0.0, 3.0, 1.0);
+  gtk_spin_button_set_value(GTK_SPIN_BUTTON(button), toolbar_rows);
+  gtk_grid_attach(GTK_GRID(grid), button, 1, row, 1, 1);
+  g_signal_connect(button, "value-changed", G_CALLBACK(toolbar_rows_cb), NULL);
+  row++;
+  col = 0;
 
   if (!radio_is_remote) {
-    row++;
     GtkWidget *b_display_warnings = gtk_check_button_new_with_label("Display Warnings");
     gtk_widget_set_name (b_display_warnings, "boldlabel");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (b_display_warnings), display_warnings);
     gtk_widget_show(b_display_warnings);
-    gtk_grid_attach(GTK_GRID(grid), b_display_warnings, 0, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), b_display_warnings, col++, row, 1, 1);
     g_signal_connect(b_display_warnings, "toggled", G_CALLBACK(display_warnings_cb), NULL);
     GtkWidget *b_display_pacurr = gtk_check_button_new_with_label("Display PA current");
     gtk_widget_set_name (b_display_pacurr, "boldlabel");
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (b_display_pacurr), display_pacurr);
     gtk_widget_show(b_display_pacurr);
-    gtk_grid_attach(GTK_GRID(grid), b_display_pacurr, 1, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), b_display_pacurr, col++, row, 1, 1);
     g_signal_connect(b_display_pacurr, "toggled", G_CALLBACK(display_pacurr_cb), NULL);
   }
 
+  button = gtk_check_button_new_with_label("Stack RX horizontally");
+  gtk_widget_set_name(button, "boldlabel");
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), my_rx_stack_horizontal);
+  gtk_grid_attach(GTK_GRID(grid), button, col, row, 1, 1);
+  g_signal_connect(button, "toggled", G_CALLBACK(horizontal_cb), NULL);
   gtk_widget_set_sensitive(wide_b, my_display_size == 1);
   gtk_widget_set_sensitive(height_b, my_display_size == 1);
   gtk_container_add(GTK_CONTAINER(content), grid);

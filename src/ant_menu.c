@@ -18,13 +18,7 @@
 */
 
 #include <gtk/gtk.h>
-#include <semaphore.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include "ant_menu.h"
 #include "band.h"
 #include "client_server.h"
 #include "message.h"
@@ -65,7 +59,7 @@ static void rx_ant_cb(GtkToggleButton *widget, gpointer data) {
   if (radio_is_remote) {
     send_band_data(client_socket, b);
   } else {
-    radio_apply_band_settings(0);
+    radio_apply_band_settings(0, 0);
   }
 }
 
@@ -78,7 +72,7 @@ static void tx_ant_cb(GtkToggleButton *widget, gpointer data) {
   if (radio_is_remote) {
     send_band_data(client_socket, b);
   } else {
-    radio_apply_band_settings(0);
+    radio_apply_band_settings(0, 0);
   }
 }
 

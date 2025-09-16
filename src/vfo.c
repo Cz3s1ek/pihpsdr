@@ -47,14 +47,11 @@
 #include "vfo.h"
 #include "channel.h"
 #include "toolbar.h"
-#include "new_menu.h"
 #include "rigctl.h"
 #include "client_server.h"
 #include "ext.h"
 #include "filter.h"
 #include "actions.h"
-#include "noise_menu.h"
-#include "equalizer_menu.h"
 #include "message.h"
 #include "sliders.h"
 
@@ -130,6 +127,8 @@ static void modesettingsSaveState() {
     SetPropF1("modeset.%d.nr4_noise_rescale", i,      mode_settings[i].nr4_noise_rescale);
     SetPropF1("modeset.%d.nr4_post_threshold", i,     mode_settings[i].nr4_post_threshold);
 #endif
+    SetPropI1("modeset.%d.en_squelch", i,             mode_settings[i].squelch_enable);
+    SetPropF1("modeset.%d.squelch", i,                mode_settings[i].squelch);
     SetPropI1("modeset.%d.anf", i,                    mode_settings[i].anf);
     SetPropI1("modeset.%d.snb", i,                    mode_settings[i].snb);
     SetPropI1("modeset.%d.agc", i,                    mode_settings[i].agc);
@@ -236,6 +235,8 @@ static void modesettingsRestoreState() {
     mode_settings[i].nr4_noise_rescale = 2.0;
     mode_settings[i].nr4_post_threshold = 2.0;
 #endif
+    mode_settings[i].squelch_enable = 0;
+    mode_settings[i].squelch = 0.0;
     mode_settings[i].anf = 0;
     mode_settings[i].snb = 0;
     mode_settings[i].en_rxeq = 0;
@@ -324,6 +325,8 @@ static void modesettingsRestoreState() {
     GetPropF1("modeset.%d.nr4_noise_rescale", i,      mode_settings[i].nr4_noise_rescale);
     GetPropF1("modeset.%d.nr4_post_threshold", i,     mode_settings[i].nr4_post_threshold);
 #endif
+    GetPropI1("modeset.%d.en_squelch", i,             mode_settings[i].squelch_enable);
+    GetPropF1("modeset.%d.squelch", i,                mode_settings[i].squelch);
     GetPropI1("modeset.%d.anf", i,                    mode_settings[i].anf);
     GetPropI1("modeset.%d.snb", i,                    mode_settings[i].snb);
     GetPropI1("modeset.%d.agc", i,                    mode_settings[i].agc);
@@ -518,16 +521,20 @@ static inline void vfo_id_adjust_band(int v, long long f) {
   // since one cycles through ALL bands.
   // bandAir is changed to bandGen if we move away from
   // one of the six WWV frequencies,
-  // bandGen is changed to another band if we enter
-  // the frequency range of the latter.
+  // bandGen is changed to another band if (and only if)
+  // we enter the frequency range of the latter.
   //
   // NOTE: you loose the LO offset when moving > 25kHz
   //       out of a transverter band!
   //
-  vfo[v].band = get_band_from_frequency(f);
-  bandstack = bandstack_get_bandstack(vfo[v].band);
-  vfo[v].bandstack = bandstack->current_entry;
-  radio_apply_band_settings(1);
+  int new_band = get_band_from_frequency(f);
+
+  if (b != new_band) {
+    vfo[v].band = get_band_from_frequency(f);
+    bandstack = bandstack_get_bandstack(vfo[v].band);
+    vfo[v].bandstack = bandstack->current_entry;
+    radio_apply_band_settings(1, v);
+  }
 }
 
 void vfo_xvtr_changed() {
@@ -579,6 +586,7 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
   int id, m;
   id = rx->id;
   m = vfo[id].mode;
+  suppress_popup_sliders++;
   //
   // Apply VFO settings to VFO controlling the receiver
   //
@@ -623,6 +631,8 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
   rx_set_agc(rx);
   rx_set_equalizer(rx);
   rx_set_noise(rx);
+  radio_set_squelch       (rx->id, mode_settings[m].squelch);
+  radio_set_squelch_enable(rx->id, mode_settings[m].squelch_enable);
 
   //
   // Transmitter-specific settings: TXEQ, CMRP, DEXP, CFC
@@ -661,12 +671,11 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
     tx_set_compressor(transmitter);
     tx_set_dexp(transmitter);
     tx_set_equalizer(transmitter);
-    suppress_popup_sliders = 1;
     radio_set_mic_gain(mode_settings[m].mic_gain);
-    suppress_popup_sliders = 0;
   }
 
   g_idle_add(ext_vfo_update, NULL);
+  suppress_popup_sliders--;
 }
 
 void vfo_id_band_changed(int id, int b) {
@@ -750,7 +759,7 @@ void vfo_id_band_changed(int id, int b) {
   }
 
   if (oldband != vfo[id].band) {
-    radio_apply_band_settings(SET(id == 0));
+    radio_apply_band_settings(1, id);
   }
 
   //
@@ -932,13 +941,14 @@ void vfo_vfos_changed() {
   // Apply the new data
   //
   rx_vfo_changed(receiver[0]);
+  radio_tx_vfo_changed();
+  radio_apply_band_settings(1, 0);
 
   if (receivers == 2) {
     rx_vfo_changed(receiver[1]);
+    radio_apply_band_settings(1, 1);
   }
 
-  radio_tx_vfo_changed();
-  radio_apply_band_settings(0);
   //
   // radio_set_alex_antennas already scheduled a HighPrio and General packet,
   // but if the mode changed to/from CW, we also need a DUCspecific packet
@@ -1191,7 +1201,7 @@ void vfo_id_set_rit_step(int id, int step) {
 }
 
 //
-// vfo_move (and vfo_id_move) are exclusively used
+// vfo_id_move is exclusively used
 // to update the radio while dragging with the
 // pointer device in the panadapter area. Therefore,
 // the behaviour is different whether we use CTUN or not.
@@ -1251,7 +1261,7 @@ void vfo_id_move(int id, long long hz, int round) {
       // *Subtract* the shift (hz) from the VFO frequency
       vfo[id].frequency = vfo[id].frequency - hz;
 
-      if (round && (vfo[id].mode != modeCWL && vfo[id].mode != modeCWU)) {
+      if (round) {
         vfo[id].frequency = ROUND(vfo[id].frequency, 0, vfo[id].step);
       }
 
@@ -1305,34 +1315,13 @@ void vfo_id_move(int id, long long hz, int round) {
   }
 }
 
-void vfo_move(long long hz, int round) {
-  vfo_id_move(active_receiver->id, hz, round);
-}
-
-void vfo_move_to(long long hz) {
-  int id = active_receiver->id;
-  vfo_id_move_to(id, hz);
-}
-
-void vfo_id_move_to(int id, long long hz) {
+void vfo_id_move_to(int id, long long f, int round) {
   if (radio_is_remote) {
-    send_vfo_move_to(client_socket, id, hz);
+    send_vfo_move_to(client_socket, id, f, round);
     return;
   }
 
-  // hz is the offset from the min displayed frequency
-  const RECEIVER *myrx;
-
-  if (id < receivers) {
-    myrx = receiver[id];
-  } else {
-    myrx = active_receiver;
-  }
-
-  long long half = (long long)(myrx->sample_rate / 2);
-  long long f = (vfo[id].frequency - half) + hz + ((double)myrx->pan * myrx->hz_per_pixel);
-
-  if (vfo[id].mode != modeCWL && vfo[id].mode != modeCWU) {
+  if (round) {
     f = ROUND(f, 0, vfo[id].step);
   }
 
@@ -1342,25 +1331,11 @@ void vfo_id_move_to(int id, long long hz) {
     if (vfo[id].ctun) {
       delta = vfo[id].ctun_frequency;
       vfo[id].ctun_frequency = f;
-
-      if (vfo[id].mode == modeCWL) {
-        vfo[id].ctun_frequency += cw_keyer_sidetone_frequency;
-      } else if (vfo[id].mode == modeCWU) {
-        vfo[id].ctun_frequency -= cw_keyer_sidetone_frequency;
-      }
-
       delta = vfo[id].ctun_frequency - delta;
       vfo_id_adjust_band(id, vfo[id].ctun_frequency);
     } else {
       delta = vfo[id].frequency;
       vfo[id].frequency = f;
-
-      if (vfo[id].mode == modeCWL) {
-        vfo[id].frequency += cw_keyer_sidetone_frequency;
-      } else if (vfo[id].mode == modeCWU) {
-        vfo[id].frequency -= cw_keyer_sidetone_frequency;
-      }
-
       delta = vfo[id].frequency - delta;
       vfo_id_adjust_band(id, vfo[id].frequency);
     }
@@ -1448,7 +1423,7 @@ static gboolean vfo_draw_cb (GtkWidget *widget,
 //
 // This function re-draws the VFO bar.
 // Lot of elements are programmed, whose size and position
-// is determined by the current vfo_layout
+// is determined by the current vfo layout
 // Elements whose x-coordinate is zero are not drawn
 //
 void vfo_update() {
@@ -1496,7 +1471,7 @@ void vfo_update() {
 
   int f = vfo[id].filter;
   int txvfo = vfo_get_tx_vfo();
-  const VFO_BAR_LAYOUT *vfl = &vfo_layout_list[vfo_layout];
+  const VFO_BAR_LAYOUT *vfl = &vfo_layout_list[display_vfobar[display_size]];
   //
   // Filter used in active receiver
   //
@@ -2003,14 +1978,14 @@ void vfo_update() {
       cairo_set_source_rgba(cr, COLOUR_ATTN);
     }
 
-    if (!transmitter->cfc && transmitter->compressor) {
+    if (!transmitter->cfc) {
       snprintf(temp_text, sizeof(temp_text), "Cmpr %d", (int) transmitter->compressor_level);
-      cairo_set_source_rgba(cr, COLOUR_ATTN);
-    }
 
-    if (!transmitter->cfc && !transmitter->compressor) {
-      snprintf(temp_text, sizeof(temp_text), "Cmpr");
-      cairo_set_source_rgba(cr, COLOUR_SHADE);
+      if (transmitter->compressor) {
+        cairo_set_source_rgba(cr, COLOUR_ATTN);
+      } else {
+        cairo_set_source_rgba(cr, COLOUR_SHADE);
+      }
     }
 
     cairo_show_text(cr, temp_text);
@@ -2227,7 +2202,7 @@ static gboolean vfo_press_event_cb (GtkWidget *widget, GdkEventButton *event, gp
   case GDK_BUTTON_PRIMARY:
     v = VFO_A;
 
-    if (event->x >= abs(vfo_layout_list[vfo_layout].vfo_b_x)) { v = VFO_B; }
+    if (event->x >= abs(vfo_layout_list[display_vfobar[display_size]].vfo_b_x)) { v = VFO_B; }
 
     g_idle_add(ext_start_vfo, GINT_TO_POINTER(v));
     break;

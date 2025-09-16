@@ -18,4 +18,4 @@
 
 #include <gtk/gtk.h>
 
-GtkWidget *hpsdr_logo(void);
+GtkWidget *piHPSDR_logo(void);

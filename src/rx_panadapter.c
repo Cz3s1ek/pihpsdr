@@ -117,11 +117,10 @@ void rx_panadapter_update(RECEIVER *rx) {
   cairo_set_source_rgba(cr, COLOUR_PAN_BACKGND);
   cairo_rectangle(cr, 0, 0, mywidth, myheight);
   cairo_fill(cr);
-  double HzPerPixel = rx->hz_per_pixel;  // need this many times
   int mode = vfo[rx->id].mode;
   long long frequency = vfo[rx->id].frequency;
   int vfoband = vfo[rx->id].band;
-  long long offset;
+  double xoffset;
   //
   // soffset contains all corrections for attenuation and preamps
   // Perhaps some adjustment is necessary for those old radios which have
@@ -143,16 +142,6 @@ void rx_panadapter_update(RECEIVER *rx) {
     soffset -= (double)(20 * adc[rx->adc].preamp);
   }
 
-  //
-  // offset is used to calculate the filter edges. They move  with the RIT value
-  //
-
-  if (vfo[rx->id].ctun) {
-    offset = vfo[rx->id].offset;
-  } else {
-    offset = vfo[rx->id].rit_enabled ? vfo[rx->id].rit : 0;
-  }
-
   // In diversity mode, the RX2 frequency tracks the RX1 frequency
   if (diversity_enabled && rx->id == 1) {
     frequency = vfo[0].frequency;
@@ -160,36 +149,35 @@ void rx_panadapter_update(RECEIVER *rx) {
     mode = vfo[0].mode;
   }
 
-  long long half = (long long)rx->sample_rate / 2LL;
-  double vfofreq = ((double) rx->pixels * 0.5) - (double)rx->pan;
+  xoffset = rx->cAp * vfo[rx->id].offset;
+  double rxpos = rx->cBp + xoffset;
+  double filter_left  = rx->cAp * rx->filter_low  + xoffset + rx->cBp;
+  double filter_right = rx->cAp * rx->filter_high + xoffset + rx->cBp;
 
-  //
-  //
-  // The CW frequency is the VFO frequency and the center of the spectrum
-  // then is at the VFO frequency plus or minus the sidetone frequency. However we
-  // will keep the center of the PANADAPTER at the VFO frequency and shift the
-  // pixels of the spectrum.
-  //
   if (mode == modeCWU) {
-    frequency -= cw_keyer_sidetone_frequency;
-    vfofreq += (double) cw_keyer_sidetone_frequency / HzPerPixel;
+    filter_left  -= cw_keyer_sidetone_frequency * rx->cAp;
+    filter_right -= cw_keyer_sidetone_frequency * rx->cAp;
   } else if (mode == modeCWL) {
-    frequency += cw_keyer_sidetone_frequency;
-    vfofreq -= (double) cw_keyer_sidetone_frequency / HzPerPixel;
+    filter_left  += cw_keyer_sidetone_frequency * rx->cAp;
+    filter_right += cw_keyer_sidetone_frequency * rx->cAp;
   }
-
-  long long min_display = frequency - half + (long long)((double)rx->pan * HzPerPixel);
-  long long max_display = min_display + (long long)((double)rx->width * HzPerPixel);
 
   if (vfoband == band60) {
     for (int i = 0; i < channel_entries; i++) {
       long long low_freq = band_channels_60m[i].frequency - (band_channels_60m[i].width / (long long)2);
       long long hi_freq = band_channels_60m[i].frequency + (band_channels_60m[i].width / (long long)2);
-      double x1 = (double) (low_freq - min_display) / HzPerPixel;
-      double x2 = (double) (hi_freq - min_display) / HzPerPixel;
-      cairo_set_source_rgba(cr, COLOUR_PAN_60M);
-      cairo_rectangle(cr, x1, 0.0, x2 - x1, myheight);
-      cairo_fill(cr);
+      double x1 = rx->cBp + (low_freq - frequency) * rx->cAp;
+      double x2 = rx->cBp + (hi_freq - frequency) * rx->cAp;
+
+      if (x1 < 0.0) { x1 = 0.0; }
+
+      if (x2 > rx->width) { x2 = rx->width; }
+
+      if (x2 - x1 > 1.0) {
+        cairo_set_source_rgba(cr, COLOUR_PAN_60M);
+        cairo_rectangle(cr, x1, 0.0, x2 - x1, myheight);
+        cairo_fill(cr);
+      }
     }
   }
 
@@ -197,8 +185,6 @@ void rx_panadapter_update(RECEIVER *rx) {
   // Filter edges.
   //
   cairo_set_source_rgba (cr, COLOUR_PAN_FILTER);
-  double filter_left = ((double)rx->pixels * 0.5) - (double)rx->pan + (((double)rx->filter_low + offset) / HzPerPixel);
-  double filter_right = ((double)rx->pixels * 0.5) - (double)rx->pan + (((double)rx->filter_high + offset) / HzPerPixel);
   cairo_rectangle(cr, filter_left, 0.0, filter_right - filter_left, myheight);
   cairo_fill(cr);
 
@@ -209,17 +195,19 @@ void rx_panadapter_update(RECEIVER *rx) {
     cairo_set_source_rgba(cr, COLOUR_PAN_LINE_WEAK);
   }
 
-  double dbm_per_line = (double)myheight / ((double)rx->panadapter_high - (double)rx->panadapter_low);
+  int panhi = rx->panadapter_high;
+  int panlo = rx->panadapter_low;
+  double dbm_per_line = (double)myheight / ((double)(panhi - panlo));
   cairo_set_line_width(cr, PAN_LINE_THIN);
   cairo_select_font_face(cr, DISPLAY_FONT_FACE, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
   cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
   char v[32];
 
-  for (int i = rx->panadapter_high; i >= rx->panadapter_low; i--) {
+  for (int i = panhi; i >= panlo; i--) {
     int mod = abs(i) % rx->panadapter_step;
 
     if (mod == 0) {
-      double y = (double)(rx->panadapter_high - i) * dbm_per_line;
+      double y = (double)(panhi - i) * dbm_per_line;
       cairo_move_to(cr, 0.0, y);
       cairo_line_to(cr, mywidth, y);
       snprintf(v, sizeof(v), "%d dBm", i);
@@ -236,7 +224,7 @@ void rx_panadapter_update(RECEIVER *rx) {
   // pixels distance between frequency markers,
   // and then round upwards to the  next 1/2/5 seris
   //
-  divisor = (rx->sample_rate * 65) / rx->pixels;
+  divisor = 65 * rx->cB;
 
   if (divisor > 500000LL) { divisor = 1000000LL; }
   else if (divisor > 200000LL) { divisor = 500000LL; }
@@ -254,7 +242,7 @@ void rx_panadapter_update(RECEIVER *rx) {
   // (in pixels)
   //
   int marker_distance = (rx->pixels * divisor) / rx->sample_rate;
-  f = ((min_display / divisor) * divisor) + divisor;
+  f = (((frequency + (int)(rx->cA + 0.5)) / divisor) * divisor);
   cairo_select_font_face(cr, DISPLAY_FONT_FACE, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
   //
   // If space is available, increase font size of freq. labels a bit
@@ -262,8 +250,12 @@ void rx_panadapter_update(RECEIVER *rx) {
   int marker_extra = (marker_distance > 100) ? 2 : 0;
   cairo_set_font_size(cr, DISPLAY_FONT_SIZE2 + marker_extra);
 
-  while (f < max_display) {
-    double x = (double)(f - min_display) / HzPerPixel;
+  for (;;) {
+    f += divisor;
+    double x = rx->cBp + (double)(f - frequency) * rx->cAp;
+
+    if (x > rx->width) { break; }
+
     cairo_move_to(cr, x, 0);
     cairo_line_to(cr, x, myheight);
 
@@ -272,7 +264,7 @@ void rx_panadapter_update(RECEIVER *rx) {
     // edge, do not print a frequency since this probably won't fit
     // on the screen
     //
-    if ((f >= min_display + divisor / 2) && (f <= max_display - divisor / 2)) {
+    if ((x >= 32) && (x <= rx->width - 32)) {
       //
       // For frequencies larger than 10 GHz, we cannot
       // display all digits here so we give three dots
@@ -289,8 +281,6 @@ void rx_panadapter_update(RECEIVER *rx) {
       cairo_move_to(cr, x - (extents.width / 2.0), 10 + marker_extra);
       cairo_show_text(cr, v);
     }
-
-    f += divisor;
   }
 
   cairo_set_line_width(cr, PAN_LINE_THIN);
@@ -299,19 +289,21 @@ void rx_panadapter_update(RECEIVER *rx) {
   if (vfoband != band60) {
     // band edges
     if (band->frequencyMin != 0LL) {
+      double x;
       cairo_set_source_rgba(cr, COLOUR_ALARM);
       cairo_set_line_width(cr, PAN_LINE_THICK);
+      x = rx->cBp + (band->frequencyMin - frequency) * rx->cAp;
 
-      if ((min_display < band->frequencyMin) && (max_display > band->frequencyMin)) {
-        double x = (double)(band->frequencyMin - min_display) / HzPerPixel;
+      if (x >= 0 && x <= rx->width) {
         cairo_move_to(cr, x, 0);
         cairo_line_to(cr, x, myheight);
         cairo_set_line_width(cr, PAN_LINE_EXTRA);
         cairo_stroke(cr);
       }
 
-      if ((min_display < band->frequencyMax) && (max_display > band->frequencyMax)) {
-        double x = (double) (band->frequencyMax - min_display) / HzPerPixel;
+      x = rx->cBp + (band->frequencyMax - frequency) * rx->cAp;
+
+      if (x >= 0 && x <= rx->width) {
         cairo_move_to(cr, x, 0);
         cairo_line_to(cr, x, myheight);
         cairo_set_line_width(cr, PAN_LINE_EXTRA);
@@ -335,13 +327,13 @@ void rx_panadapter_update(RECEIVER *rx) {
   if (rx->agc != AGC_OFF) {
     cairo_set_line_width(cr, PAN_LINE_THICK);
     double knee_y = rx->agc_thresh + soffset;
-    knee_y = floor((rx->panadapter_high - knee_y)
+    knee_y = floor((panhi - knee_y)
                    * (double) myheight
-                   / (rx->panadapter_high - rx->panadapter_low));
+                   / (double) (panhi - panlo));
     double hang_y = rx->agc_hang + soffset;
-    hang_y = floor((rx->panadapter_high - hang_y)
+    hang_y = floor((panhi - hang_y)
                    * (double) myheight
-                   / (rx->panadapter_high - rx->panadapter_low));
+                   / (double) (panhi - panlo));
 
     if (rx->agc != AGC_MEDIUM && rx->agc != AGC_FAST) {
       if (active) {
@@ -385,264 +377,260 @@ void rx_panadapter_update(RECEIVER *rx) {
     cairo_set_source_rgba(cr, COLOUR_ALARM_WEAK);
   }
 
-  cairo_move_to(cr, vfofreq + (offset / HzPerPixel), 0.0);
-  cairo_line_to(cr, vfofreq + (offset / HzPerPixel), myheight);
+  cairo_move_to(cr, rxpos, 0.0);
+  cairo_line_to(cr, rxpos, myheight);
   cairo_set_line_width(cr, PAN_LINE_THIN);
   cairo_stroke(cr);
-  // signal
-  double s1;
-  int pan = rx->pan;
 
-  if (radio_is_remote) {
+  if (rx->pixels_available) {
     //
-    // A client will only hold as many samples as there are pixels
+    // draw spectrum
     //
-    pan = 0;
-  }
-
-  samples[pan] = -200.0;
-  samples[mywidth - 1 + pan] = -200.0;
-  //
-  // most HPSDR only have attenuation (no gain), while HermesLite-II and SOAPY use gain (no attenuation)
-  //
-  s1 = (double)samples[pan] + soffset;
-  s1 = floor((rx->panadapter_high - s1)
-             * (double) myheight
-             / (rx->panadapter_high - rx->panadapter_low));
-  cairo_move_to(cr, 0.0, s1);
-
-  for (int i = 1; i < mywidth; i++) {
-    double s2;
-    s2 = (double)samples[i + pan] + soffset;
-    s2 = floor((rx->panadapter_high - s2)
+    double s1;
+    samples[0] = -200.0;
+    samples[mywidth - 1] = -200.0;
+    //
+    // most HPSDR only have attenuation (no gain), while HermesLite-II and SOAPY use gain (no attenuation)
+    //
+    s1 = (double)samples[0] + soffset;
+    s1 = floor((panhi - s1)
                * (double) myheight
-               / (rx->panadapter_high - rx->panadapter_low));
-    cairo_line_to(cr, i, s2);
-  }
+               / (double) (panhi - panlo));
+    cairo_move_to(cr, 0.0, s1);
 
-  cairo_pattern_t *gradient;
-  gradient = NULL;
-
-  if (rx->display_gradient) {
-    gradient = cairo_pattern_create_linear(0.0, myheight, 0.0, 0.0);
-    // calculate where S9 is
-    double S9 = -73;
-
-    if (vfo[rx->id].frequency > 30000000LL) {
-      S9 = -93;
+    for (int i = 1; i < mywidth; i++) {
+      double s2;
+      s2 = (double)samples[i] + soffset;
+      s2 = floor((panhi - s2)
+                 * (double) myheight
+                 / (double) (panhi - panlo));
+      cairo_line_to(cr, i, s2);
     }
 
-    S9 = floor((rx->panadapter_high - S9)
-               * (double) myheight
-               / (rx->panadapter_high - rx->panadapter_low));
-    S9 = 1.0 - (S9 / (double)myheight);
+    cairo_pattern_t *gradient;
+    gradient = NULL;
 
-    if (active) {
-      cairo_pattern_add_color_stop_rgba(gradient, 0.0,         COLOUR_GRAD1);
-      cairo_pattern_add_color_stop_rgba(gradient, S9 / 3.0,      COLOUR_GRAD2);
-      cairo_pattern_add_color_stop_rgba(gradient, (S9 / 3.0) * 2.0, COLOUR_GRAD3);
-      cairo_pattern_add_color_stop_rgba(gradient, S9,          COLOUR_GRAD4);
-    } else {
-      cairo_pattern_add_color_stop_rgba(gradient, 0.0,         COLOUR_GRAD1_WEAK);
-      cairo_pattern_add_color_stop_rgba(gradient, S9 / 3.0,      COLOUR_GRAD2_WEAK);
-      cairo_pattern_add_color_stop_rgba(gradient, (S9 / 3.0) * 2.0, COLOUR_GRAD3_WEAK);
-      cairo_pattern_add_color_stop_rgba(gradient, S9,          COLOUR_GRAD4_WEAK);
-    }
+    if (rx->display_gradient) {
+      gradient = cairo_pattern_create_linear(0.0, myheight, 0.0, 0.0);
+      // calculate where S9 is
+      double S9 = -73;
 
-    cairo_set_source(cr, gradient);
-  } else {
-    //
-    // Different shades of white
-    //
-    if (active) {
-      if (!rx->display_filled) {
-        cairo_set_source_rgba(cr, COLOUR_PAN_FILL3);
+      if (vfo[rx->id].frequency > 30000000LL) {
+        S9 = -93;
+      }
+
+      S9 = floor((panhi - S9)
+                 * (double) myheight
+                 / (double) (panhi - panlo));
+      S9 = 1.0 - (S9 / (double)myheight);
+
+      if (active) {
+        cairo_pattern_add_color_stop_rgba(gradient, 0.0,         COLOUR_GRAD1);
+        cairo_pattern_add_color_stop_rgba(gradient, S9 / 3.0,      COLOUR_GRAD2);
+        cairo_pattern_add_color_stop_rgba(gradient, (S9 / 3.0) * 2.0, COLOUR_GRAD3);
+        cairo_pattern_add_color_stop_rgba(gradient, S9,          COLOUR_GRAD4);
       } else {
-        cairo_set_source_rgba(cr, COLOUR_PAN_FILL2);
+        cairo_pattern_add_color_stop_rgba(gradient, 0.0,         COLOUR_GRAD1_WEAK);
+        cairo_pattern_add_color_stop_rgba(gradient, S9 / 3.0,      COLOUR_GRAD2_WEAK);
+        cairo_pattern_add_color_stop_rgba(gradient, (S9 / 3.0) * 2.0, COLOUR_GRAD3_WEAK);
+        cairo_pattern_add_color_stop_rgba(gradient, S9,          COLOUR_GRAD4_WEAK);
       }
+
+      cairo_set_source(cr, gradient);
     } else {
-      cairo_set_source_rgba(cr, COLOUR_PAN_FILL1);
-    }
-  }
-
-  if (rx->display_filled) {
-    cairo_close_path (cr);
-    cairo_fill_preserve (cr);
-    cairo_set_line_width(cr, PAN_LINE_THIN);
-  } else {
-    //
-    // if not filling, use thicker line
-    //
-    cairo_set_line_width(cr, PAN_LINE_THICK);
-  }
-
-  cairo_stroke(cr);
-
-  if (gradient) {
-    cairo_pattern_destroy(gradient);
-  }
-
-  if (rx->panadapter_peaks_on != 0) {
-    int num_peaks = rx->panadapter_num_peaks;
-    gboolean peaks_in_passband = SET(rx->panadapter_peaks_in_passband_filled);
-    gboolean hide_noise = SET(rx->panadapter_hide_noise_filled);
-    double noise_percentile = (double)rx->panadapter_ignore_noise_percentile;
-    int ignore_range_divider = rx->panadapter_ignore_range_divider;
-    int ignore_range = (mywidth + ignore_range_divider - 1) / ignore_range_divider; // Round up
-    double peaks[num_peaks];
-    int peak_positions[num_peaks];
-
-    for (int a = 0; a < num_peaks; a++) {
-      peaks[a] = -200;
-      peak_positions[a] = 0;
-    }
-
-    // Calculate the noise level if needed
-    double noise_level = 0.0;
-
-    if (hide_noise) {
-      // Dynamically allocate a copy of samples for sorting
-      double *sorted_samples = malloc(mywidth * sizeof(double));
-
-      if (sorted_samples != NULL) {
-        for (int i = 0; i < mywidth; i++) {
-          sorted_samples[i] = (double)samples[i + pan] + soffset;
+      //
+      // Different shades of gray
+      //
+      if (active) {
+        if (!rx->display_filled) {
+          cairo_set_source_rgba(cr, COLOUR_PAN_FILL3);
+        } else {
+          cairo_set_source_rgba(cr, COLOUR_PAN_FILL2);
         }
-
-        qsort(sorted_samples, mywidth, sizeof(double), compare_doubles);
-        int index = (int)((noise_percentile / 100.0) * mywidth);
-        noise_level = sorted_samples[index] + 3.0;
-        free(sorted_samples); // Free memory after use
+      } else {
+        cairo_set_source_rgba(cr, COLOUR_PAN_FILL1);
       }
     }
 
-    // Detect peaks
-    double filter_left_bound = peaks_in_passband ? filter_left : 0;
-    double filter_right_bound = peaks_in_passband ? filter_right : mywidth;
+    if (rx->display_filled) {
+      cairo_close_path (cr);
+      cairo_fill_preserve (cr);
+      cairo_set_line_width(cr, PAN_LINE_THIN);
+    } else {
+      //
+      // if not filling, use thicker line
+      //
+      cairo_set_line_width(cr, PAN_LINE_THICK);
+    }
 
-    for (int i = 1; i < mywidth - 1; i++) {
-      if (i >= filter_left_bound && i <= filter_right_bound) {
-        double s = (double)samples[i + pan] + soffset;
+    cairo_stroke(cr);
 
-        // Check if the point is a peak
-        if ((!hide_noise || s >= noise_level) && s > samples[i - 1 + pan] && s > samples[i + 1 + pan]) {
-          int replace_index = -1;
-          int start_range = i - ignore_range;
-          int end_range = i + ignore_range;
+    if (gradient) {
+      cairo_pattern_destroy(gradient);
+    }
 
-          // Check if the peak is within the ignore range of any existing peak
-          for (int j = 0; j < num_peaks; j++) {
-            if (peak_positions[j] >= start_range && peak_positions[j] <= end_range) {
-              if (s > peaks[j]) {
-                replace_index = j;
-                break;
-              } else {
-                replace_index = -2;
-                break;
-              }
-            }
+    if (rx->panadapter_peaks_on != 0) {
+      int num_peaks = rx->panadapter_num_peaks;
+      gboolean peaks_in_passband = SET(rx->panadapter_peaks_in_passband_filled);
+      gboolean hide_noise = SET(rx->panadapter_hide_noise_filled);
+      double noise_percentile = (double)rx->panadapter_ignore_noise_percentile;
+      int ignore_range_divider = rx->panadapter_ignore_range_divider;
+      int ignore_range = (mywidth + ignore_range_divider - 1) / ignore_range_divider; // Round up
+      double peaks[num_peaks];
+      int peak_positions[num_peaks];
+
+      for (int a = 0; a < num_peaks; a++) {
+        peaks[a] = -200;
+        peak_positions[a] = 0;
+      }
+
+      // Calculate the noise level if needed
+      double noise_level = 0.0;
+
+      if (hide_noise) {
+        // Dynamically allocate a copy of samples for sorting
+        double *sorted_samples = malloc(mywidth * sizeof(double));
+
+        if (sorted_samples != NULL) {
+          for (int i = 0; i < mywidth; i++) {
+            sorted_samples[i] = (double)samples[i] + soffset;
           }
 
-          // Replace the existing peak if a higher peak is found within the ignore range
-          if (replace_index >= 0) {
-            peaks[replace_index] = s;
-            peak_positions[replace_index] = i;
-          }
-          // Add the peak if no peaks are found within the ignore range
-          else if (replace_index == -1) {
-            // Find the index of the lowest peak
-            int lowest_peak_index = 0;
+          qsort(sorted_samples, mywidth, sizeof(double), compare_doubles);
+          int index = (int)((noise_percentile / 100.0) * mywidth);
+          noise_level = sorted_samples[index] + 3.0;
+          free(sorted_samples); // Free memory after use
+        }
+      }
 
-            for (int j = 1; j < num_peaks; j++) {
-              if (peaks[j] < peaks[lowest_peak_index]) {
-                lowest_peak_index = j;
+      // Detect peaks
+      double filter_left_bound = peaks_in_passband ? filter_left : 0;
+      double filter_right_bound = peaks_in_passband ? filter_right : mywidth;
+
+      for (int i = 1; i < mywidth - 1; i++) {
+        if (i >= filter_left_bound && i <= filter_right_bound) {
+          double s = (double)samples[i] + soffset;
+
+          // Check if the point is a peak
+          if ((!hide_noise || s >= noise_level) && s > samples[i - 1] && s > samples[i + 1]) {
+            int replace_index = -1;
+            int start_range = i - ignore_range;
+            int end_range = i + ignore_range;
+
+            // Check if the peak is within the ignore range of any existing peak
+            for (int j = 0; j < num_peaks; j++) {
+              if (peak_positions[j] >= start_range && peak_positions[j] <= end_range) {
+                if (s > peaks[j]) {
+                  replace_index = j;
+                  break;
+                } else {
+                  replace_index = -2;
+                  break;
+                }
               }
             }
 
-            // Replace the lowest peak if the current peak is higher
-            if (s > peaks[lowest_peak_index]) {
-              peaks[lowest_peak_index] = s;
-              peak_positions[lowest_peak_index] = i;
+            // Replace the existing peak if a higher peak is found within the ignore range
+            if (replace_index >= 0) {
+              peaks[replace_index] = s;
+              peak_positions[replace_index] = i;
+            }
+            // Add the peak if no peaks are found within the ignore range
+            else if (replace_index == -1) {
+              // Find the index of the lowest peak
+              int lowest_peak_index = 0;
+
+              for (int j = 1; j < num_peaks; j++) {
+                if (peaks[j] < peaks[lowest_peak_index]) {
+                  lowest_peak_index = j;
+                }
+              }
+
+              // Replace the lowest peak if the current peak is higher
+              if (s > peaks[lowest_peak_index]) {
+                peaks[lowest_peak_index] = s;
+                peak_positions[lowest_peak_index] = i;
+              }
             }
           }
         }
       }
-    }
 
-    // Sort peaks in descending order
-    for (int i = 0; i < num_peaks - 1; i++) {
-      for (int j = i + 1; j < num_peaks; j++) {
-        if (peaks[i] < peaks[j]) {
-          double temp_peak = peaks[i];
-          peaks[i] = peaks[j];
-          peaks[j] = temp_peak;
-          int temp_pos = peak_positions[i];
-          peak_positions[i] = peak_positions[j];
-          peak_positions[j] = temp_pos;
+      // Sort peaks in descending order
+      for (int i = 0; i < num_peaks - 1; i++) {
+        for (int j = i + 1; j < num_peaks; j++) {
+          if (peaks[i] < peaks[j]) {
+            double temp_peak = peaks[i];
+            peaks[i] = peaks[j];
+            peaks[j] = temp_peak;
+            int temp_pos = peak_positions[i];
+            peak_positions[i] = peak_positions[j];
+            peak_positions[j] = temp_pos;
+          }
         }
       }
-    }
 
-    // Draw peak values on the chart
-    cairo_set_source_rgba(cr, COLOUR_PAN_TEXT); // Set text color
-    cairo_select_font_face(cr, DISPLAY_FONT_FACE, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
-    double previous_text_positions[num_peaks][2]; // Store previous text positions (x, y)
+      // Draw peak values on the chart
+      cairo_set_source_rgba(cr, COLOUR_PAN_TEXT); // Set text color
+      cairo_select_font_face(cr, DISPLAY_FONT_FACE, CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+      cairo_set_font_size(cr, DISPLAY_FONT_SIZE2);
+      double previous_text_positions[num_peaks][2]; // Store previous text positions (x, y)
 
-    for (int j = 0; j < num_peaks; j++) {
-      previous_text_positions[j][0] = -1; // Initialise x positions
-      previous_text_positions[j][1] = -1; // Initialise y positions
-    }
+      for (int j = 0; j < num_peaks; j++) {
+        previous_text_positions[j][0] = -1; // Initialise x positions
+        previous_text_positions[j][1] = -1; // Initialise y positions
+      }
 
-    for (int j = 0; j < num_peaks; j++) {
-      if (peak_positions[j] > 0) {
-        char peak_label[32];
-        snprintf(peak_label, sizeof(peak_label), "%.1f", peaks[j]);
-        cairo_text_extents(cr, peak_label, &extents);
-        // Calculate initial text position: slightly above the peak
-        double text_x = peak_positions[j];
-        double text_y = floor((rx->panadapter_high - peaks[j])
-                              * (double)myheight
-                              / (rx->panadapter_high - rx->panadapter_low)) - 5;
+      for (int j = 0; j < num_peaks; j++) {
+        if (peak_positions[j] > 0) {
+          char peak_label[32];
+          snprintf(peak_label, sizeof(peak_label), "%.1f", peaks[j]);
+          cairo_text_extents(cr, peak_label, &extents);
+          // Calculate initial text position: slightly above the peak
+          double text_x = peak_positions[j];
+          double text_y = floor((panhi - peaks[j])
+                                * (double)myheight
+                                / (double) (panhi - panlo)) - 5;
 
-        // Ensure text stays within the drawing area
-        if (text_y < extents.height) {
-          text_y = extents.height; // Push text down to fit inside the top boundary
-        }
+          // Ensure text stays within the drawing area
+          if (text_y < extents.height) {
+            text_y = extents.height; // Push text down to fit inside the top boundary
+          }
 
-        // Adjust position to avoid overlap with previous labels
-        for (int k = 0; k < j; k++) {
-          double prev_x = previous_text_positions[k][0];
-          double prev_y = previous_text_positions[k][1];
+          // Adjust position to avoid overlap with previous labels
+          for (int k = 0; k < j; k++) {
+            double prev_x = previous_text_positions[k][0];
+            double prev_y = previous_text_positions[k][1];
 
-          if (prev_x >= 0 && prev_y >= 0) {
-            double distance_x = fabs(text_x - prev_x);
-            double distance_y = fabs(text_y - prev_y);
+            if (prev_x >= 0 && prev_y >= 0) {
+              double distance_x = fabs(text_x - prev_x);
+              double distance_y = fabs(text_y - prev_y);
 
-            if (distance_y < extents.height && distance_x < extents.width) {
-              // Try moving vertically first
-              if (text_y + extents.height < myheight) {
-                text_y += extents.height + 5; // Move below
-              } else if (text_y - extents.height > 0) {
-                text_y -= extents.height + 5; // Move above
-              } else {
-                // Move horizontally if no vertical space is available
-                if (text_x + extents.width < mywidth) {
-                  text_x += extents.width + 5; // Move right
-                } else if (text_x - extents.width > 0) {
-                  text_x -= extents.width + 5; // Move left
+              if (distance_y < extents.height && distance_x < extents.width) {
+                // Try moving vertically first
+                if (text_y + extents.height < myheight) {
+                  text_y += extents.height + 5; // Move below
+                } else if (text_y - extents.height > 0) {
+                  text_y -= extents.height + 5; // Move above
+                } else {
+                  // Move horizontally if no vertical space is available
+                  if (text_x + extents.width < mywidth) {
+                    text_x += extents.width + 5; // Move right
+                  } else if (text_x - extents.width > 0) {
+                    text_x -= extents.width + 5; // Move left
+                  }
                 }
               }
             }
           }
-        }
 
-        // Draw text
-        cairo_move_to(cr, text_x - (extents.width / 2.0), text_y);
-        cairo_show_text(cr, peak_label);
-        // Store current text position for overlap checks
-        previous_text_positions[j][0] = text_x;
-        previous_text_positions[j][1] = text_y;
+          // Draw text
+          cairo_move_to(cr, text_x - (extents.width / 2.0), text_y);
+          cairo_show_text(cr, peak_label);
+          // Store current text position for overlap checks
+          previous_text_positions[j][0] = text_x;
+          previous_text_positions[j][1] = text_y;
+        }
       }
     }
   }

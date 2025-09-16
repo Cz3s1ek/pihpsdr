@@ -147,9 +147,8 @@ extern int pa_power;
 extern double pa_trim[11];
 extern const int pa_power_list[];
 
-extern int display_zoompan;
-extern int display_sliders;
-extern int display_toolbar;
+extern int slider_rows;
+extern int toolbar_rows;
 
 extern int mic_linein;
 extern double linein_gain;
@@ -190,6 +189,7 @@ extern int enable_tx_inhibit;
 extern int TxInhibit;
 
 extern int vfo_encoder_divisor;
+extern int vfo_snap;
 
 extern int protocol;
 extern int device;
@@ -287,17 +287,23 @@ extern const int tx_dialog_height;
 // exception: my_combo_attach()
 //
 extern gboolean radio_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer data);
+extern void   radio_n2adr_oc_settings();
+extern void   radio_load_filters(int fb);
 extern void   radio_set_mox(int state);
 extern void   radio_toggle_mox(void);
 extern void   radio_toggle_tune(void);
 extern void   radio_save_state();
-extern void   radio_stop(void);
+extern void   radio_shutdown(void);
+extern void   radio_reboot(void);
+extern void   radio_exit_program(void);
+extern void   radio_stop_radio(void);
 extern void   radio_reconfigure(void);
 extern void   radio_reconfigure_screen(void);
+extern void   radio_stop_program(void);
 extern void   radio_start_radio(void);
 extern void   radio_change_receivers(int r);
 extern void   radio_change_sample_rate(int rate);
-extern void   radio_apply_band_settings(int flag);
+extern void   radio_apply_band_settings(int flag, int id);
 extern void   radio_tx_vfo_changed(void);
 extern void   radio_split_toggle(void);
 extern void   radio_set_split(int v);
@@ -305,11 +311,21 @@ extern void   radio_set_mox(int state);
 extern void   radio_set_twotone(TRANSMITTER *tx, int state);
 extern int    radio_get_mox(void);
 extern void   radio_set_tune(int state);
+extern void   radio_set_duplex(int state);
+extern void   radio_set_cw_speed(int s);
+extern void   radio_set_sidetone_freq(int f);
 extern void   radio_set_vox(int state);
 extern double radio_get_drive(void);
 extern void   radio_set_drive(double d);
+extern void   radio_set_diversity(int state);
+extern void   radio_set_diversity_gain(double g);
+extern void   radio_set_diversity_phase(double p);
 extern void   radio_calc_drive_level(void);
+extern void   radio_calc_div_params(void);
 extern void   radio_calc_tune_drive_level(void);
+extern void   radio_set_panhigh(int id, int value);
+extern void   radio_set_panlow(int id, int value);
+extern void   radio_set_panstep(int id, int value);
 extern void   radio_set_attenuation(int id, int value);
 extern void   radio_set_random(int id, int value);
 extern void   radio_set_dither(int id, int value);
@@ -335,15 +351,19 @@ extern void   radio_set_af_gain(int id, double value);
 extern void   radio_set_rf_gain(int id, double value);
 extern void   radio_set_mic_gain(double value);
 extern void   radio_set_linein_gain(double value);
+extern void   radio_set_zoom(int id, int value);
+extern void   radio_set_pan(int id, int value);
 
 extern int compare_doubles(const void *a, const void *b);
 
-extern void radio_remote_change_receivers(int r);
-extern int  radio_remote_start(void *data);
-extern void radio_remote_set_mox(int state);
-extern void radio_remote_set_vox(int state);
-extern void radio_remote_set_tune(int state);
-extern void radio_remote_set_twotone(int state);
+extern int  radio_remote_change_receivers(gpointer data);
+extern int  radio_remote_start(gpointer data);
+extern int  radio_remote_set_mox(gpointer data);
+extern int  radio_remote_set_vox(gpointer data);
+extern int  radio_remote_set_tune(gpointer data);
+extern int  radio_remote_set_twotone(gpointer data);
+extern int  radio_remote_protocol_run(gpointer data);
+extern int  radio_remote_protocol_stop(gpointer data);
 
 extern int optimize_for_touchscreen;
 extern void my_combo_attach(GtkGrid *grid, GtkWidget *combo, int row, int col, int spanrow, int spancol);

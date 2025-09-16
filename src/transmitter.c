@@ -19,8 +19,6 @@
 
 #include <gtk/gtk.h>
 #include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <wdsp.h>
 
@@ -391,6 +389,8 @@ void tx_save_state(const TRANSMITTER *tx) {
     SetPropF1("transmitter.%d.dexp_release",                        tx->id,    tx->dexp_release);
     SetPropF1("transmitter.%d.dexp_hold",                           tx->id,    tx->dexp_hold);
     SetPropI1("transmitter.%d.eq_enable",                           tx->id,    tx->eq_enable);
+    SetPropF1("transmitter.%d.tt1_freq",                            tx->id,    tx->tt1_freq);
+    SetPropF1("transmitter.%d.tt2_freq",                            tx->id,    tx->tt2_freq);
 
     for (int i = 0; i < 11; i++) {
       SetPropF2("transmitter.%d.eq_freq[%d]",                       tx->id, i, tx->eq_freq[i]);
@@ -478,6 +478,8 @@ void tx_restore_state(TRANSMITTER *tx) {
     GetPropF1("transmitter.%d.dexp_release",                        tx->id,    tx->dexp_release);
     GetPropF1("transmitter.%d.dexp_hold",                           tx->id,    tx->dexp_hold);
     GetPropI1("transmitter.%d.eq_enable",                           tx->id,    tx->eq_enable);
+    GetPropF1("transmitter.%d.tt1_freq",                            tx->id,    tx->tt1_freq);
+    GetPropF1("transmitter.%d.tt2_freq",                            tx->id,    tx->tt2_freq);
 
     for (int i = 0; i < 11; i++) {
       GetPropF2("transmitter.%d.eq_freq[%d]",                       tx->id, i, tx->eq_freq[i]);
@@ -730,9 +732,15 @@ static gboolean tx_update_display(gpointer data) {
     if (tx->puresignal && tx->feedback) {
       RECEIVER *rx_feedback = receiver[PS_RX_FEEDBACK];
       g_mutex_lock(&rx_feedback->display_mutex);
-      rc = rx_get_pixels(rx_feedback);
+      rx_get_pixels(rx_feedback);
+      rc = rx_feedback->pixels_available;
 
       if (rc) {
+        //
+        // The number of pixels that we need to copy depends on the "duplex" state.
+        // If duplex, then there is a separate TX window that is narrower than
+        // the window size.
+        //
         int full  = rx_feedback->pixels;  // number of pixels in the feedback spectrum
         int width = tx->pixels;           // number of pixels to copy from the feedback spectrum
         int start = (full - width) / 2;   // Copy from start ... (end-1)
@@ -784,7 +792,7 @@ static gboolean tx_update_display(gpointer data) {
 
     if (rc) {
       if (remoteclient.running) {
-        remote_send_txspectrum();
+        send_txspectrum();
       }
 
       tx_panadapter_update(tx);
@@ -977,6 +985,8 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
   tx->swrtune = 0;
   tx->swrtune_volume = 0.1;
   tx->twotone = 0;
+  tx->tt1_freq = 700.0;
+  tx->tt2_freq = 1900.0;
   tx->puresignal = 0;
   //
   // PS 2.0 default parameters
@@ -1980,7 +1990,9 @@ void tx_add_ps_iq_samples(const TRANSMITTER *tx, double i_sample_tx, double q_sa
   }
 }
 
-void tx_remote_update_display(TRANSMITTER *tx) {
+int tx_remote_update_display(gpointer data) {
+  TRANSMITTER *tx = (TRANSMITTER *) data;
+
   if (tx->displaying) {
     if (tx->pixels > 0) {
       g_mutex_lock(&tx->display_mutex);
@@ -1996,6 +2008,8 @@ void tx_remote_update_display(TRANSMITTER *tx) {
       }
     }
   }
+
+  return G_SOURCE_REMOVE;
 }
 
 void tx_create_remote(TRANSMITTER *tx) {
@@ -2552,6 +2566,8 @@ void tx_set_bandpass(const TRANSMITTER *tx) {
 }
 
 void tx_set_compressor(TRANSMITTER *tx) {
+  g_idle_add(sliders_cmpr, GINT_TO_POINTER(100 * suppress_popup_sliders));
+
   if (radio_is_remote) {
     send_tx_compressor(client_socket);
     return;
@@ -2819,11 +2835,11 @@ void tx_set_twotone(TRANSMITTER *tx, int state) {
     case modeCWL:
     case modeLSB:
     case modeDIGL:
-      SetTXAPostGenTTFreq(tx->id, -700.0, -1900.0);
+      SetTXAPostGenTTFreq(tx->id, -tx->tt1_freq, -tx->tt2_freq);
       break;
 
     default:
-      SetTXAPostGenTTFreq(tx->id, 700.0, 1900.0);
+      SetTXAPostGenTTFreq(tx->id, tx->tt1_freq, tx->tt2_freq);
       break;
     }
 
@@ -2852,6 +2868,6 @@ void tx_set_twotone(TRANSMITTER *tx, int state) {
     }
   }
 
-  g_idle_add(ext_set_mox, GINT_TO_POINTER(state));
+  g_idle_add(ext_radio_set_mox, GINT_TO_POINTER(state));
 }
 

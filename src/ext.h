@@ -19,30 +19,24 @@
 
 #include "client_server.h"
 
-extern int ext_remote_command(void *data);
-extern int ext_rx_remote_update_display(void *data);
-extern int ext_tx_remote_update_display(void *data);
+extern int radio_reconfigure_screen_done;
+
 extern int ext_set_title(void *data);
-extern int ext_remote_set_zoom(void *data);
-extern int ext_remote_set_pan(void *data);
-extern int ext_radio_remote_change_receivers(void *data);
-extern int ext_radio_remote_set_mox(void *data);
-extern int ext_radio_remote_set_vox(void *data);
-extern int ext_radio_remote_set_tune(void *data);
 
 //
 // The following calls functions can be called usig g_idle_add
 //
 extern int ext_start_radio(void *data);
 extern int ext_vfo_update(void *data);
-extern int ext_set_tune(void *data);
-extern int ext_set_mox(void *data);
+extern int ext_radio_set_tune(void *data);
+extern int ext_radio_set_mox(void *data);
 extern int ext_start_tx(void *data);        // is this necessary?
 extern int ext_start_rx(void *data);
 extern int ext_start_vfo(void *data);
 extern int ext_start_band(void *data);
-extern int ext_set_vox(void *data);
-extern int ext_set_duplex(void *data);      // is this necessary?
+extern int ext_radio_set_vox(void *data);
+extern int ext_radio_set_duplex(void *data);      // is this necessary?
+extern int ext_radio_reconfigure_screen(void *data);
 
 ///////////////////////////////////////////////////////////
 //

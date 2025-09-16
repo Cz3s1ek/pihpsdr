@@ -65,6 +65,7 @@ static GtkWidget *apps_combobox[MAX_DEVICES];
 static GtkWidget *host_combo = NULL;
 static GtkWidget *host_entry = NULL;
 static GtkWidget *host_pwd = NULL;
+static int        pwd_from_props = 0;
 static int        host_entry_changed = 0;
 static int        host_pos = 0;
 static int        host_empty = 0;
@@ -97,7 +98,7 @@ static void print_devices(void) {
     switch (discovered[i].protocol) {
     case ORIGINAL_PROTOCOL:
     case NEW_PROTOCOL:
-      t_print("%s: found protocol=%d device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) on %s\n",
+      t_print("%s: found protocol=%d device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) via %s\n",
               __FUNCTION__,
               discovered[i].protocol,
               discovered[i].device,
@@ -114,7 +115,7 @@ static void print_devices(void) {
       break;
 
     case SOAPYSDR_PROTOCOL:
-      t_print("%s: found protocol=%d driver=%s software_version=%d driver_key=%s hardware_key=%s on %s\n", __FUNCTION__,
+      t_print("%s: found protocol=%d driver=%s software_version=%d driver_key=%s hardware_key=%s via %s\n", __FUNCTION__,
               discovered[i].protocol,
               discovered[i].name,
               discovered[i].software_version,
@@ -269,6 +270,15 @@ static void save_hostlist() {
 
   SetPropI0("num_hosts", count);
   SetPropS0("current_host", host_addr);
+
+  if (pwd_from_props) {
+    const char *mypwd = gtk_entry_get_text(GTK_ENTRY(host_pwd));
+
+    if (strlen(mypwd) > 4) {
+      SetPropS0("host_pwd", mypwd);
+    }
+  }
+
   SetPropS0("property_version", "3.00");
   saveProperties("remote.props");
   gtk_combo_box_set_active(GTK_COMBO_BOX(host_combo), host_pos);
@@ -316,7 +326,7 @@ static void host_entry_cb(GtkWidget *widget, gpointer data) {
   save_hostlist();
 }
 
-static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer user_data) {
+static void connect_cb(GtkWidget *widget, gpointer data) {
   char myhost[256];
   int  myport;
   const char *mypwd;
@@ -337,7 +347,7 @@ static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer us
 
   if (*myhost == 0 || myport == 0) {
     g_idle_add(fatal_error, "NOTICE: invalid host:port string.");
-    return TRUE;
+    return;
   }
 
   switch (radio_connect_remote(myhost, myport, mypwd)) {
@@ -370,8 +380,6 @@ static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer us
     g_idle_add(fatal_error, "NOTICE: unknown error in connect.");
     break;
   }
-
-  return TRUE;
 }
 
 static void host_combo_cb(GtkWidget *widget, gpointer data) {
@@ -605,7 +613,7 @@ static void discovery() {
       discovered[devices].protocol = ORIGINAL_PROTOCOL;
       discovered[devices].device = DEVICE_OZY;
       discovered[devices].software_version = 10;              // we can't know yet so this isn't a real response
-      snprintf(discovered[devices].name, sizeof(discovered[devices].name), "Ozy on USB");
+      snprintf(discovered[devices].name, sizeof(discovered[devices].name), "Ozy via USB");
       discovered[devices].frequency_min = 0.0;
       discovered[devices].frequency_max = 61440000.0;
 
@@ -722,11 +730,11 @@ static void discovery() {
           snprintf(text, sizeof(text), "%s (%s via USB)", d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2");
         } else if (d->device == NEW_DEVICE_SATURN && strcmp(d->network.interface_name, "XDMA") == 0) {
-          snprintf(text, sizeof(text), "%s (%s v%d) fpga:%x (%s) on /dev/xdma*", d->name,
+          snprintf(text, sizeof(text), "%s (%s v%d) fpga:%x (%s) via /dev/xdma*", d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2", d->software_version,
                    d->fpga_version, macStr);
         } else {
-          snprintf(text, sizeof(text), "%s (%s %s) %s (%s) on %s: ",
+          snprintf(text, sizeof(text), "%s (%s %s) %s (%s) via %s ",
                    d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2",
                    version,
@@ -739,7 +747,7 @@ static void discovery() {
 
       case SOAPYSDR_PROTOCOL:
 #ifdef SOAPYSDR
-        snprintf(text, sizeof(text), "%s (Protocol SOAPY_SDR %s) on %s", d->name, d->soapy.version, d->soapy.address);
+        snprintf(text, sizeof(text), "%s (Protocol SOAPY_SDR %s) via %s", d->name, d->soapy.version, d->soapy.address);
 #endif
         break;
 
@@ -886,8 +894,27 @@ static void discovery() {
   // Create the password entry box
   host_pwd = gtk_entry_new();
   gtk_entry_set_visibility(GTK_ENTRY(host_pwd), FALSE);
-  gtk_entry_set_placeholder_text(GTK_ENTRY(host_pwd), "Server Password");
+  //
+  // If there *is* a host pwd in the props file, it will be used
+  // and also written back to the props file. But a password
+  // will only occur in remote.props if it has been put there
+  // by manual editing.
+  //
+  *str = 0;
+  GetPropS0("host_pwd", str);
+
+  if (strlen(str) > 4) {
+    gtk_entry_set_text(GTK_ENTRY(host_pwd), str);
+    pwd_from_props = 1;
+  } else {
+    gtk_entry_set_placeholder_text(GTK_ENTRY(host_pwd), "Server Password");
+  }
+
   gtk_grid_attach(GTK_GRID(grid), host_pwd, 2, row, 1, 1);
+  //
+  // "Enter" in the pwd file induces connection
+  //
+  g_signal_connect(host_pwd, "activate", G_CALLBACK(connect_cb), NULL);
   // Create the password visibility toggle button
   GtkWidget *toggle_button = gtk_toggle_button_new_with_label("Show");
   g_signal_connect(toggle_button, "toggled", G_CALLBACK(password_visibility_cb), host_pwd);

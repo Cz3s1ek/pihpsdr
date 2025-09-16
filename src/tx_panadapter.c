@@ -34,7 +34,6 @@
 #include "gpio.h"
 #include "message.h"
 #include "mode.h"
-#include "new_menu.h"
 #include "radio.h"
 #include "receiver.h"
 #include "rx_panadapter.h"
@@ -107,7 +106,6 @@ void tx_panadapter_update(TRANSMITTER *tx) {
     int txmode = vfo_get_tx_mode();
     double filter_left, filter_right;
     float *samples = tx->pixel_samples;
-    //double hz_per_pixel = (double)tx->iq_output_rate / (double)tx->pixels;
     double hz_per_pixel = 24000.0 / (double)tx->pixels;
     cairo_t *cr;
     cr = cairo_create (tx->panadapter_surface);

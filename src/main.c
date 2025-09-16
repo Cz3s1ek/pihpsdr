@@ -17,12 +17,7 @@
 *
 */
 #include <gtk/gtk.h>
-#include <gdk/gdk.h>
 #include <math.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <semaphore.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/resource.h>
@@ -41,10 +36,9 @@
 #include "css.h"
 #include "discovery.h"
 #include "discovered.h"
-#include "exit_menu.h"
 #include "ext.h"
 #include "gpio.h"
-#include "hpsdr_logo.h"
+#include "piHPSDR_logo.h"
 #include "main.h"
 #include "message.h"
 #include "new_menu.h"
@@ -68,6 +62,7 @@ GdkScreen *screen;
 int display_size;
 int display_width[6] = {0, 0, 640, 800, 1024, 1280};
 int display_height[6] = {0, 0, 400, 480, 600, 720};
+int display_vfobar[6] = {0, 0, 0, 0, 0, 0};
 int this_monitor;
 
 static GdkCursor *cursor_arrow;
@@ -105,7 +100,7 @@ static void* wisdom_thread(void *arg) {
 // cppcheck-suppress constParameterCallback
 static gboolean main_delete (GtkWidget *widget) {
   if (radio != NULL) {
-    stop_program();
+    radio_stop_program();
   }
 
   _exit(0);
@@ -258,7 +253,7 @@ static void activate_pihpsdr(GtkApplication *app, gpointer data) {
   // Closely following Heiko's suggestion, we now have the HPSDR log contained
   // in the code and need not fiddle around with the question from where to load it.
   //
-  GtkWidget *image = hpsdr_logo();
+  GtkWidget *image = piHPSDR_logo();
 
   if (image) {
     gtk_grid_attach(GTK_GRID(topgrid), image, 0, 0, 1, 3);

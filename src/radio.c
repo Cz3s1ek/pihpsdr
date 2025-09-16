@@ -18,10 +18,6 @@
 */
 
 #include <gtk/gtk.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <semaphore.h>
 #include <math.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -50,7 +46,6 @@
 #include "meter.h"
 #include "message.h"
 #ifdef MIDI
-  #include "midi_menu.h"
   #include "midi.h"
 #endif
 #include "mode.h"
@@ -58,13 +53,10 @@
 #include "new_protocol.h"
 #include "old_protocol.h"
 #include "property.h"
-#include "radio_menu.h"
 #include "radio.h"
 #include "receiver.h"
-#include "rigctl_menu.h"
 #include "rigctl.h"
 #include "rx_panadapter.h"
-#include "screen_menu.h"
 #include "sliders.h"
 #include "tci.h"
 #include "test_menu.h"
@@ -85,7 +77,6 @@
 #include "vfo.h"
 #include "vox.h"
 #include "waterfall.h"
-#include "zoompan.h"
 
 #define min(x,y) (x<y?x:y)
 #define max(x,y) (x<y?y:x)
@@ -97,8 +88,7 @@ int VFO_HEIGHT = 60;              // taken from the current VFO bar layout
 int VFO_WIDTH = 530;              // taken from the current VFO bar layout
 int METER_WIDTH = 200;            // dynamically set in choose_vfo_layout
 
-static int ZOOMPAN_HEIGHT = 50;   // dynamically adjusted to the display height
-static int SLIDERS_HEIGHT = 100;  // dynamically adjusted to the display height
+static int SLIDERS_HEIGHT = 50;   // dynamically adjusted to the display height
 static int TOOLBAR_HEIGHT = 30;   // dynamically adjusted to the display height
 
 int rx_stack_horizontal = 0;
@@ -111,9 +101,6 @@ static GtkWidget *hide_b;
 static GtkWidget *menu_b;
 static GtkWidget *vfo_panel;
 static GtkWidget *meter;
-static GtkWidget *zoompan;
-static GtkWidget *sliders;
-static GtkWidget *toolbar;
 
 // RX and TX calibration
 long long frequency_calibration = 0LL;
@@ -170,6 +157,8 @@ int anan10E = 0;
 int mute_spkr_amp = 0;      // Mute audio amplifier in radio                (ANAN-7000, G2)
 int mute_spkr_xmit = 0;     // Mute audio amplifier in radio upon transmit  (ANAN-7000, G2)
 
+static int radio_protocol_running = 0;
+
 int tx_out_of_band_allowed = 0;
 
 int filter_board = ALEX;
@@ -178,9 +167,8 @@ int pa_power = PA_1W;
 const int pa_power_list[] = {1, 5, 10, 30, 50, 100, 200, 500, 1000};
 double pa_trim[11];
 
-int display_zoompan = 0;
-int display_sliders = 0;
-int display_toolbar = 0;
+int slider_rows = 2;
+int toolbar_rows = 2;
 
 int mic_linein = 0;        // Use microphone rather than linein in radio's audio codec
 double linein_gain = 0.0;  // -34.0 ... +12.5 in steps of 1.5 dB
@@ -217,6 +205,7 @@ int enable_tx_inhibit = 0;
 int TxInhibit = 0;
 
 int vfo_encoder_divisor = 1;
+int vfo_snap = 0;
 
 int protocol;
 int device;
@@ -519,7 +508,7 @@ gboolean radio_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer data)
   return ret;
 }
 
-void radio_stop() {
+void radio_stop_radio() {
   ASSERT_SERVER();
 
   if (can_transmit) {
@@ -545,6 +534,7 @@ static void choose_vfo_layout() {
   // b) secure that the VFO layout width fits
   //
   int rc;
+  int layout = display_vfobar[display_size];
   const VFO_BAR_LAYOUT *vfl;
   rc = 1;
   vfl = vfo_layout_list;
@@ -553,13 +543,13 @@ static void choose_vfo_layout() {
   for (;;) {
     if (vfl->width < 0) { break; }
 
-    if ((vfl - vfo_layout_list) == vfo_layout) { rc = 0; }
+    if ((vfl - vfo_layout_list) == layout) { rc = 0; }
 
     vfl++;
   }
 
   if (rc) {
-    vfo_layout = 0;
+    layout = 0;
   }
 
   METER_WIDTH = MIN_METER_WIDTH;
@@ -571,7 +561,7 @@ static void choose_vfo_layout() {
   // Choose the first largest layout that fits
   // with a minimum-width meter
   //
-  if (vfo_layout_list[vfo_layout].width > VFO_WIDTH) {
+  if (vfo_layout_list[layout].width > VFO_WIDTH) {
     vfl = vfo_layout_list;
 
     for (;;) {
@@ -585,18 +575,21 @@ static void choose_vfo_layout() {
       vfl++;
     }
 
-    vfo_layout = vfl - vfo_layout_list;
-    t_print("%s: vfo_layout changed (width=%d)\n", __FUNCTION__, vfl->width);
+    layout = vfl - vfo_layout_list;
+    //t_print("%s: vfo_layout changed (width=%d)\n", __FUNCTION__, vfl->width);
   }
 
   //
   // If chosen layout leaves at least 50 pixels unused:
   // give 50 extra pixels to the meter
   //
-  if (vfo_layout_list[vfo_layout].width < VFO_WIDTH - 50) {
+  if (vfo_layout_list[layout].width < VFO_WIDTH - 50) {
     VFO_WIDTH -= 50;
     METER_WIDTH += 50;
   }
+
+  VFO_HEIGHT = vfo_layout_list[layout].height;
+  display_vfobar[display_size] = layout;
 }
 
 static guint full_screen_timeout = 0;
@@ -631,11 +624,12 @@ void radio_reconfigure_screen() {
   int last_fullscreen = SET(ws & GDK_WINDOW_STATE_FULLSCREEN);
   int my_fullscreen = SET(display_size == 0);  // this will not change during this procedure
 
-  if (last_fullscreen != my_fullscreen) {
-    if (full_screen_timeout > 0) {
-      g_source_remove(full_screen_timeout);
-      full_screen_timeout = 0;
-    }
+  //
+  // Cancel any pending "full screen" transitions
+  //
+  if (full_screen_timeout > 0) {
+    g_source_remove(full_screen_timeout);
+    full_screen_timeout = 0;
   }
 
   //
@@ -645,45 +639,19 @@ void radio_reconfigure_screen() {
   //
   int my_width  = display_width[display_size];
   int my_height = display_height[display_size];
-
-  if (toolbar) {
-    gtk_container_remove(GTK_CONTAINER(fixed), toolbar);
-    toolbar = NULL;
-  }
-
-  if (sliders) {
-    gtk_container_remove(GTK_CONTAINER(fixed), sliders);
-    sliders = NULL;
-  }
-
-  if (zoompan) {
-    gtk_container_remove(GTK_CONTAINER(fixed), zoompan);
-    zoompan = NULL;
-  }
-
   choose_vfo_layout();
-  VFO_HEIGHT = vfo_layout_list[vfo_layout].height;
-
-  //
-  // If there is enough space, increase the meter width
-  //
 
   //
   // Change sizes of main window, Hide and Menu buttons, meter, and vfo
   //
-  if (last_fullscreen != my_fullscreen && !my_fullscreen) {
+  if (last_fullscreen && !my_fullscreen) {
     //
     // A full-screen to window transition
     //
     gtk_window_unfullscreen(GTK_WINDOW(top_window));
-    //
-    // For some reason, moving the window immediately does not work
-    // on MacOS, therefore do this after waiting a second
-    //
-    full_screen_timeout = g_timeout_add(1000, set_full_screen, GINT_TO_POINTER(0));
   }
 
-  if (last_fullscreen != SET(display_size == 0) && my_fullscreen) {
+  if (!last_fullscreen && my_fullscreen) {
     //
     // A window-to-fullscreen transition
     // here we move the window, the transition is then
@@ -719,12 +687,15 @@ void radio_reconfigure_screen() {
   //
   radio_reconfigure();
 
-  if (last_fullscreen != my_fullscreen && my_fullscreen) {
+  if (last_fullscreen != my_fullscreen) {
     //
     // For some reason, going to full-screen immediately does not
-    // work on MacOS, so do this after 1 second
+    // work on MacOS, so do this after 1 second. The same applies
+    // to moving the window to the new position after a fullscreen-
+    // to-window transition.
+    // Note this "delayed transition" may cause all sorts of problems.
     //
-    full_screen_timeout = g_timeout_add(1000, set_full_screen, GINT_TO_POINTER(1));
+    full_screen_timeout = g_timeout_add(1000, set_full_screen, GINT_TO_POINTER(my_fullscreen));
   }
 
   g_idle_add(ext_vfo_update, NULL);
@@ -746,30 +717,17 @@ void radio_reconfigure() {
   //
   if (my_height < 560) {
     TOOLBAR_HEIGHT = 30;
-    ZOOMPAN_HEIGHT = 50;
-    SLIDERS_HEIGHT = 100;
+    SLIDERS_HEIGHT = 50;
   } else if (my_height < 720) {
     TOOLBAR_HEIGHT = 40;
-    ZOOMPAN_HEIGHT = 55;
-    SLIDERS_HEIGHT = 110;
+    SLIDERS_HEIGHT = 55;
   } else {
     TOOLBAR_HEIGHT = 50;
-    ZOOMPAN_HEIGHT = 60;
-    SLIDERS_HEIGHT = 120;
+    SLIDERS_HEIGHT = 60;
   }
 
-  if (display_zoompan) {
-    rx_height -= ZOOMPAN_HEIGHT;
-  }
-
-  if (display_sliders) {
-    rx_height -= SLIDERS_HEIGHT;
-  }
-
-  if (display_toolbar) {
-    rx_height -= TOOLBAR_HEIGHT;
-  }
-
+  rx_height -= SLIDERS_HEIGHT * slider_rows;
+  rx_height -= TOOLBAR_HEIGHT * toolbar_rows;
   y = VFO_HEIGHT;
 
   // if there is only one receiver, both cases here do the same.
@@ -778,14 +736,16 @@ void radio_reconfigure() {
 
     for (i = 0; i < receivers; i++) {
       RECEIVER *rx = receiver[i];
+      g_mutex_lock(&rx->display_mutex);
       rx->width = my_width / receivers;
-      rx_update_zoom(rx);
+      rx_update_width(rx);
       rx_reconfigure(rx, rx_height);
 
       if (!radio_is_transmitting() || duplex) {
         gtk_fixed_move(GTK_FIXED(fixed), rx->panel, x, y);
       }
 
+      g_mutex_unlock(&rx->display_mutex);
       rx->x = x;
       rx->y = y;
       x = x + my_width / receivers;
@@ -795,69 +755,35 @@ void radio_reconfigure() {
   } else {
     for (i = 0; i < receivers; i++) {
       RECEIVER *rx = receiver[i];
+      g_mutex_lock(&rx->display_mutex);
       rx->width = my_width;
-      rx_update_zoom(rx);
+      rx_update_width(rx);
       rx_reconfigure(rx, rx_height / receivers);
 
       if (!radio_is_transmitting() || duplex) {
         gtk_fixed_move(GTK_FIXED(fixed), rx->panel, 0, y);
       }
 
+      g_mutex_unlock(&rx->display_mutex);
       rx->x = 0;
       rx->y = y;
       y += rx_height / receivers;
     }
   }
 
-  if (display_zoompan) {
-    if (zoompan == NULL) {
-      zoompan = zoompan_init(my_width, ZOOMPAN_HEIGHT);
-      gtk_fixed_put(GTK_FIXED(fixed), zoompan, 0, y);
-    } else {
-      gtk_fixed_move(GTK_FIXED(fixed), zoompan, 0, y);
-    }
-
-    gtk_widget_show_all(zoompan);
-    y += ZOOMPAN_HEIGHT;
+  if (slider_rows > 0) {
+    sliders_create(my_width, SLIDERS_HEIGHT, slider_rows);
+    sliders_show_sliders(y);
+    y += SLIDERS_HEIGHT * slider_rows;
   } else {
-    if (zoompan != NULL) {
-      gtk_container_remove(GTK_CONTAINER(fixed), zoompan);
-      zoompan = NULL;
-    }
+    sliders_destroy();
   }
 
-  if (display_sliders) {
-    if (sliders == NULL) {
-      sliders = sliders_init(my_width, SLIDERS_HEIGHT);
-      gtk_fixed_put(GTK_FIXED(fixed), sliders, 0, y);
-    } else {
-      gtk_fixed_move(GTK_FIXED(fixed), sliders, 0, y);
-    }
-
-    gtk_widget_show_all(sliders);                // ... this shows both C25 and Alex ATT/Preamp
-    g_idle_add(sliders_att_type_changed, NULL);  // ... and this hides the „wrong“ ones.
-    y += SLIDERS_HEIGHT;
+  if (toolbar_rows > 0) {
+    toolbar_create(my_width, TOOLBAR_HEIGHT, toolbar_rows);
+    toolbar_show(y);
   } else {
-    if (sliders != NULL) {
-      gtk_container_remove(GTK_CONTAINER(fixed), sliders);
-      sliders = NULL;
-    }
-  }
-
-  if (display_toolbar) {
-    if (toolbar == NULL) {
-      toolbar = toolbar_init(my_width, TOOLBAR_HEIGHT);
-      gtk_fixed_put(GTK_FIXED(fixed), toolbar, 0, y);
-    } else {
-      gtk_fixed_move(GTK_FIXED(fixed), toolbar, 0, y);
-    }
-
-    gtk_widget_show_all(toolbar);
-  } else {
-    if (toolbar != NULL) {
-      gtk_container_remove(GTK_CONTAINER(fixed), toolbar);
-      toolbar = NULL;
-    }
+    toolbar_destroy();
   }
 
   if (can_transmit && !duplex) {
@@ -873,7 +799,6 @@ void radio_reconfigure() {
 // hide/show status of the Zoom/Sliders/Toolbar area.
 //
 static int hide_status = 0;
-static int old_zoom = 0;
 static int old_tool = 0;
 static int old_slid = 0;
 
@@ -891,10 +816,9 @@ static gboolean hideall_cb  (GtkWidget *widget, GdkEventButton *event, gpointer 
     //
     hide_status = 1;
     gtk_button_set_label(GTK_BUTTON(hide_b), "Show");
-    old_zoom = display_zoompan;
-    old_slid = display_sliders;
-    old_tool = display_toolbar;
-    display_toolbar = display_sliders = display_zoompan = 0;
+    old_slid = slider_rows;
+    old_tool = toolbar_rows;
+    toolbar_rows = slider_rows = 0;
     radio_reconfigure();
   } else {
     //
@@ -902,9 +826,8 @@ static gboolean hideall_cb  (GtkWidget *widget, GdkEventButton *event, gpointer 
     //
     hide_status = 0;
     gtk_button_set_label(GTK_BUTTON(hide_b), "Hide");
-    display_zoompan = old_zoom;
-    display_sliders = old_slid;
-    display_toolbar = old_tool;
+    slider_rows = old_slid;
+    toolbar_rows = old_tool;
     radio_reconfigure();
   }
 
@@ -943,18 +866,8 @@ static void radio_create_visual() {
   gtk_fixed_put(GTK_FIXED(fixed), menu_b, VFO_WIDTH + METER_WIDTH, y);
   y += VFO_HEIGHT / 2;
   rx_height = my_height - VFO_HEIGHT;
-
-  if (display_zoompan) {
-    rx_height -= ZOOMPAN_HEIGHT;
-  }
-
-  if (display_sliders) {
-    rx_height -= SLIDERS_HEIGHT;
-  }
-
-  if (display_toolbar) {
-    rx_height -= TOOLBAR_HEIGHT;
-  }
+  rx_height -= SLIDERS_HEIGHT * slider_rows;
+  rx_height -= TOOLBAR_HEIGHT * toolbar_rows;
 
   //
   // To be on the safe side, we create ALL receiver panels here
@@ -964,7 +877,7 @@ static void radio_create_visual() {
     if (radio_is_remote) {
       rx_create_remote(receiver[i]);
     } else {
-      receiver[i] = rx_create_receiver(CHANNEL_RX0 + i, my_width, my_width, rx_height / RECEIVERS);
+      receiver[i] = rx_create_receiver(CHANNEL_RX0 + i, my_width, rx_height / RECEIVERS);
       rx_set_squelch(receiver[i]);
     }
 
@@ -975,7 +888,7 @@ static void radio_create_visual() {
 
     if (!radio_is_remote) {
       rx_set_displaying(receiver[i]);
-      rx_set_offset(receiver[i], vfo[i].offset);
+      rx_set_offset(receiver[i]);
     }
 
     gtk_fixed_put(GTK_FIXED(fixed), receiver[i]->panel, 0, y);
@@ -1082,21 +995,15 @@ static void radio_create_visual() {
     }
   }
 
-  if (display_zoompan) {
-    zoompan = zoompan_init(my_width, ZOOMPAN_HEIGHT);
-    gtk_fixed_put(GTK_FIXED(fixed), zoompan, 0, y);
-    y += ZOOMPAN_HEIGHT;
+  if (slider_rows > 0) {
+    sliders_create(my_width, SLIDERS_HEIGHT, slider_rows);
+    sliders_show_sliders(y);
+    y += SLIDERS_HEIGHT * slider_rows;
   }
 
-  if (display_sliders) {
-    sliders = sliders_init(my_width, SLIDERS_HEIGHT);
-    gtk_fixed_put(GTK_FIXED(fixed), sliders, 0, y);
-    y += SLIDERS_HEIGHT;
-  }
-
-  if (display_toolbar) {
-    toolbar = toolbar_init(my_width, TOOLBAR_HEIGHT);
-    gtk_fixed_put(GTK_FIXED(fixed), toolbar, 0, y);
+  if (toolbar_rows > 0) {
+    toolbar_create(my_width, TOOLBAR_HEIGHT, toolbar_rows);
+    toolbar_show(y);
   }
 
   //
@@ -1112,7 +1019,7 @@ static void radio_create_visual() {
     receivers = RECEIVERS;
 
     if (radio_is_remote) {
-      radio_remote_change_receivers(r);
+      radio_remote_change_receivers(GINT_TO_POINTER(r));
     } else {
       radio_change_receivers(r);
     }
@@ -1120,6 +1027,58 @@ static void radio_create_visual() {
 
   gtk_widget_show_all (top_window);             // ... this shows both the HPSDR and C25 preamp/att sliders
   g_idle_add(sliders_att_type_changed, NULL);   // ... and this hides the „wrong“ ones.
+}
+
+void radio_stop_program() {
+#ifdef GPIO
+  gpio_close();
+  t_print("%s: GPIO closed\n", __FUNCTION__);
+#endif
+
+  if (!radio_is_remote) {
+    radio_protocol_stop();
+    t_print("%s: protocol stopped\n", __FUNCTION__);
+    radio_stop_radio();
+    t_print("%s: radio stopped\n", __FUNCTION__);
+
+    if (have_saturn_xdma) {
+#ifdef SATURN
+      saturn_exit();
+#endif
+    }
+  }
+
+  radio_save_state();
+  t_print("%s: radio state saved\n", __FUNCTION__);
+}
+
+void radio_exit_program() {
+  radio_stop_program();
+  _exit(0);
+}
+
+void radio_shutdown() {
+  radio_stop_program();
+  //
+  // The following call may fail (e.g. missing admin privileges),
+  // in this case the program simply exits.
+  //
+#ifdef __APPLE__
+  (void) system("shutdown -h now");
+#else
+  (void) system("sudo shutdown -h -P now");
+#endif
+  _exit(0);
+}
+
+void radio_reboot() {
+  radio_stop_program();
+  //
+  // The following call may fail (e.g. missing admin privileges),
+  // in this case the program simply exits.
+  //
+  (void) system("sudo reboot");
+  _exit(0);
 }
 
 void radio_start_radio() {
@@ -1309,7 +1268,6 @@ void radio_start_radio() {
   case DEVICE_METIS:
   case DEVICE_OZY:
   case NEW_DEVICE_ATLAS:
-    have_rx_att = 1; // Sure?
     have_alex_att = 1;
     have_preamp = 1;
     have_dither = 1;
@@ -1345,6 +1303,7 @@ void radio_start_radio() {
     //       BUT: the Dither bit is hi-jacked without documentation (!)
     //       for a "band voltage" output, see:
     //       https://github.com/softerhardware/Hermes-Lite2/wiki/Band-Volts
+    //       ... so we will show the Dither and Random checkboxes in the RX menu
     //
     have_dither = 1;
     have_rx_gain = 1;
@@ -1507,6 +1466,8 @@ void radio_start_radio() {
 
   for (unsigned int i = 0; i < strlen(property_path); i++) {
     if (property_path[i] == '/') { property_path[i] = '.'; }
+
+    if (property_path[i] == ' ') { property_path[i] = '-'; }
   }
 
   //
@@ -1524,11 +1485,9 @@ void radio_start_radio() {
   case NEW_DEVICE_HERMES_LITE:
   case NEW_DEVICE_HERMES_LITE2:
     //
-    // If there are two MERCURY cards on the ATLAS bus, this is detected
-    // in old_protocol.c, But, n_adc can keep the value of 1 since the
-    // ADC assignment is fixed in that case (RX1: first mercury card,
-    // RX2: second mercury card).
-    //
+    // METIS/OZY: if two mercury cards are detected in old_protocol.c,
+    // then RX1 and RX2 are hard-wired to ADC1 and ADC2. We keep
+    // n_adc = 1 since this setup does not support DIVERSITY.
     n_adc = 1;
     break;
 
@@ -1603,7 +1562,7 @@ void radio_start_radio() {
     adc[1].max_gain = +48.0;
     adc[1].gain = rx_gain_calibration;
     filter_board = N2ADR;
-    n2adr_oc_settings(); // Apply default OC settings for N2ADR board
+    radio_n2adr_oc_settings(); // Apply default OC settings for N2ADR board
     break;
 
   case SOAPYSDR_USB_DEVICE:
@@ -1622,30 +1581,6 @@ void radio_start_radio() {
     filter_board = ALEX;
     break;
   }
-
-#ifdef GPIO
-
-  switch (controller) {
-  case NO_CONTROLLER:
-    display_zoompan = 1;
-    display_sliders = 1;
-    display_toolbar = 1;
-    break;
-
-  case CONTROLLER2_V1:
-  case CONTROLLER2_V2:
-  case G2_FRONTPANEL:
-    display_zoompan = 1;
-    display_sliders = 0;
-    display_toolbar = 0;
-    break;
-  }
-
-#else
-  display_zoompan = 1;
-  display_sliders = 1;
-  display_toolbar = 1;
-#endif
 
   switch (protocol) {
   case SOAPYSDR_PROTOCOL:
@@ -1764,7 +1699,7 @@ void radio_start_radio() {
     // Apply RX setting to the SOAPY receivers
     //
     for (int id = 0; id < RECEIVERS; id++) {
-      RECEIVER *rx = receiver[id];
+      const RECEIVER *rx = receiver[id];
       soapy_protocol_set_automatic_gain(id, adc[id].agc);
       soapy_protocol_set_rx_antenna(id, adc[id].antenna);
       soapy_protocol_set_rx_frequency(id);
@@ -1831,12 +1766,17 @@ void radio_start_radio() {
   //
   g_signal_handler_disconnect(top_window, keypress_signal_id);
   keypress_signal_id = g_signal_connect(top_window, "key_press_event", G_CALLBACK(radio_keypress_cb), NULL);
+  //
+  // mark radio as "running"
+  //
+  radio_protocol_running = 1;
 }
 
-void radio_remote_change_receivers(int r) {
+int radio_remote_change_receivers(gpointer data) {
+  int r = GPOINTER_TO_INT(data);
   t_print("radio_remote_change_receivers: from %d to %d\n", receivers, r);
 
-  if (receivers == r) { return; }
+  if (receivers == r) { return G_SOURCE_REMOVE; }
 
   switch (r) {
   case 1:
@@ -1856,6 +1796,7 @@ void radio_remote_change_receivers(int r) {
 
   radio_reconfigure_screen();
   rx_set_active(receiver[0]);
+  return G_SOURCE_REMOVE;
 }
 
 void radio_change_receivers(int r) {
@@ -2164,7 +2105,9 @@ void radio_toggle_mox() {
   radio_set_mox(!mox);
 }
 
-void radio_remote_set_vox(int state) {
+int radio_remote_set_vox(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != radio_is_transmitting()) {
       rxtx(state);
@@ -2175,9 +2118,13 @@ void radio_remote_set_vox(int state) {
     vox = state;
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_mox(int state) {
+int radio_remote_set_mox(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != radio_is_transmitting()) {
       rxtx(state);
@@ -2189,17 +2136,22 @@ void radio_remote_set_mox(int state) {
     vox = 0;
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_twotone(int state) {
+int radio_remote_set_twotone(gpointer data) {
   if (can_transmit) {
-    transmitter->twotone = state;
+    transmitter->twotone = GPOINTER_TO_INT(data);
   }
 
   g_idle_add(ext_vfo_update, NULL);
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_tune(int state) {
+int radio_remote_set_tune(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != transmitter->tune) {
       vox_cancel();
@@ -2216,6 +2168,36 @@ void radio_remote_set_tune(int state) {
 
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
+}
+
+void radio_set_zoom(int id, int value) {
+  if (id >= receivers) { return; }
+
+  RECEIVER *rx = receiver[id];
+
+  if (value > MAX_ZOOM) { value = MAX_ZOOM; }
+
+  if (value < 1       ) { value = 1; }
+
+  rx->zoom = value;
+  rx_update_zoom(rx);
+  g_idle_add(sliders_zoom, GINT_TO_POINTER(100 + id));
+}
+
+void radio_set_pan(int id, int value) {
+  if (id >= receivers) { return; }
+
+  RECEIVER *rx = receiver[id];
+
+  if (value < -100) { value = -100; }
+
+  if (value > 100) { value = 100; }
+
+  rx->pan = value;
+  rx_update_pan(rx);
+  g_idle_add(sliders_pan, GINT_TO_POINTER(100 + id));
 }
 
 void radio_set_mox(int state) {
@@ -2264,6 +2246,204 @@ void radio_set_mox(int state) {
 
 int radio_get_mox() {
   return mox;
+}
+
+void radio_set_duplex(int state) {
+  //
+  // This can only be called from the GTK main thread.
+  //
+  if (!can_transmit || (state == duplex)) { return; }
+
+  if (radio_is_remote) {
+    send_duplex(client_socket, state);
+  }
+
+  duplex = state;
+
+  if (duplex) {
+    // TX is in separate window, also in full-screen mode
+    gtk_container_remove(GTK_CONTAINER(fixed), transmitter->panel);
+    tx_reconfigure(transmitter, 4 * tx_dialog_width, tx_dialog_width,  tx_dialog_height);
+    tx_create_dialog(transmitter);
+  } else {
+    GtkWidget *content = gtk_dialog_get_content_area(GTK_DIALOG(transmitter->dialog));
+    gtk_container_remove(GTK_CONTAINER(content), transmitter->panel);
+    gtk_widget_destroy(transmitter->dialog);
+    transmitter->dialog = NULL;
+    int width = display_width[display_size];
+    tx_reconfigure(transmitter, width, width, rx_height);
+  }
+
+  g_idle_add(ext_vfo_update, NULL);
+}
+
+void radio_n2adr_oc_settings() {
+  ASSERT_SERVER();
+  //
+  // set OC outputs for each band according to the N2ADR board requirements
+  // unlike load_filters(), this can be executed outside the GTK queue
+  //
+  BAND *band;
+  band = band_get_band(band160);
+  band->OCrx = band->OCtx = 1;
+  band = band_get_band(band80);
+  band->OCrx = band->OCtx = 66;
+  band = band_get_band(band60);
+  band->OCrx = band->OCtx = 68;
+  band = band_get_band(band40);
+  band->OCrx = band->OCtx = 68;
+  band = band_get_band(band30);
+  band->OCrx = band->OCtx = 72;
+  band = band_get_band(band20);
+  band->OCrx = band->OCtx = 72;
+  band = band_get_band(band17);
+  band->OCrx = band->OCtx = 80;
+  band = band_get_band(band15);
+  band->OCrx = band->OCtx = 80;
+  band = band_get_band(band12);
+  band->OCrx = band->OCtx = 96;
+  band = band_get_band(band10);
+  band->OCrx = band->OCtx = 96;
+  schedule_high_priority();
+}
+
+void radio_load_filters(int b) {
+  filter_board = b;
+
+  if (radio_is_remote) {
+    send_filter_board(client_socket, filter_board);
+    return;
+  }
+
+  switch (filter_board) {
+  case N2ADR:
+    radio_n2adr_oc_settings();
+    break;
+
+  case ALEX:
+  case APOLLO:
+  case CHARLY25:
+    // This is most likely not necessary here, but can do no harm
+    radio_apply_band_settings(0, 0);
+    break;
+
+  case NO_FILTER_BOARD:
+    break;
+
+  default:
+    break;
+  }
+
+  //
+  // This switches between StepAttenuator slider and CHARLY25 ATT/Preamp checkboxes
+  // when the filter board is switched to/from CHARLY25
+  //
+  g_idle_add(sliders_att_type_changed, NULL);
+}
+
+void radio_set_cw_speed(int val) {
+  cw_keyer_speed = val;
+
+  if (!radio_is_remote) {
+    keyer_update();
+    schedule_transmit_specific();
+  }
+
+  g_idle_add(ext_vfo_update, NULL);
+}
+
+void radio_set_sidetone_freq(int val) {
+  cw_keyer_sidetone_frequency = val;
+
+  if (radio_is_remote) {
+    send_sidetone_freq(client_socket, cw_keyer_sidetone_frequency);
+  } else {
+    // changing the side tone frequency affects BFO frequency offsets
+    rx_filter_changed(active_receiver);
+    rx_set_offset(active_receiver);
+    schedule_transmit_specific();
+  }
+
+  g_idle_add(ext_vfo_update, NULL);
+}
+
+void radio_calc_div_params() {
+  //
+  // Calculate the Cosine and Sine values
+  // corresponding to the current values
+  // of the DIVERSITY gain and phase
+  //
+  double amplitude, arg;
+  amplitude = pow(10.0, 0.05 * div_gain);
+  arg = div_phase * 0.017453292519943295769236907684886; // Pi/180
+  div_cos = amplitude * cos(arg);
+  div_sin = amplitude * sin(arg);
+}
+
+void radio_set_diversity_gain(double val) {
+  if (val < -27.0) { val = -27.0; }
+
+  if (val >  27.0) { val =  27.0; }
+
+  div_gain = val;
+
+  if (!suppress_popup_sliders) {
+    g_idle_add(sliders_diversity_gain, NULL);
+  }
+
+  if (radio_is_remote) {
+    send_diversity(client_socket, diversity_enabled, div_gain, div_phase);
+    return;
+  }
+
+  radio_calc_div_params();
+}
+
+void radio_set_diversity_phase(double value) {
+  while (value >  180.0) { value -= 360.0; }
+
+  while (value < -180.0) { value += 360.0; }
+
+  div_phase = value;
+
+  if (!suppress_popup_sliders) {
+    g_idle_add(sliders_diversity_phase, NULL);
+  }
+
+  if (radio_is_remote) {
+    send_diversity(client_socket, diversity_enabled, div_gain, div_phase);
+    return;
+  }
+
+  radio_calc_div_params();
+}
+
+void radio_set_diversity(int state) {
+  if (radio_is_remote) {
+    send_diversity(client_socket, state, div_gain, div_phase);
+  } else {
+    //
+    // If we have only one receiver, then changing diversity
+    // changes the number of HPSR receivers so we restart the
+    // original protocol
+    //
+    if (protocol == ORIGINAL_PROTOCOL && receivers == 1) {
+      old_protocol_stop();
+    }
+
+    diversity_enabled = state;
+
+    if (protocol == ORIGINAL_PROTOCOL && receivers == 1) {
+      old_protocol_run();
+    }
+
+    schedule_high_priority();
+    schedule_receive_specific();
+    radio_calc_div_params();
+  }
+
+  diversity_enabled = state;
+  g_idle_add(ext_vfo_update, NULL);
 }
 
 void radio_set_vox(int state) {
@@ -2629,14 +2809,12 @@ void radio_calc_drive_level() {
 }
 
 void radio_set_rf_gain(int id, double value) {
-  if (id >= receivers) { return; }
-
-  if (!have_rx_gain) { return; }
+  if (id >= receivers || !have_rx_gain) { return; }
 
   int rxadc = receiver[id]->adc;
   adc[rxadc].gain = value;
   adc[rxadc].attenuation = 0.0;
-  sliders_rf_gain(id, rxadc);
+  g_idle_add(sliders_rf_gain, GINT_TO_POINTER(100 * suppress_popup_sliders + id));
 
   if (radio_is_remote) {
     send_rfgain(client_socket, id, adc[rxadc].gain);
@@ -2664,6 +2842,7 @@ void radio_set_squelch_enable(int id, int enable) {
   RECEIVER *rx = receiver[id];
   rx->squelch_enable = enable;
   rx_set_squelch(rx);
+  g_idle_add(sliders_squelch, GINT_TO_POINTER(100 * suppress_popup_sliders + id));
 }
 
 void radio_set_squelch(int id, double value) {
@@ -2679,7 +2858,7 @@ void radio_set_squelch(int id, double value) {
   rx->squelch = value;
   rx->squelch_enable = (rx->squelch > 0.5);
   rx_set_squelch(rx);
-  sliders_squelch(rx->id);
+  g_idle_add(sliders_squelch, GINT_TO_POINTER(100 * suppress_popup_sliders + rx->id));
 }
 
 void radio_set_linein_gain(double value) {
@@ -2691,7 +2870,7 @@ void radio_set_linein_gain(double value) {
     schedule_high_priority();
   }
 
-  sliders_linein_gain();
+  g_idle_add(sliders_linein_gain, GINT_TO_POINTER(100 * suppress_popup_sliders));
 }
 
 void radio_set_mic_gain(double value) {
@@ -2700,7 +2879,7 @@ void radio_set_mic_gain(double value) {
     tx_set_mic_gain(transmitter);
   }
 
-  sliders_mic_gain();
+  g_idle_add(sliders_mic_gain, GINT_TO_POINTER(100 * suppress_popup_sliders));
 }
 
 void radio_set_af_gain(int id, double value) {
@@ -2709,7 +2888,7 @@ void radio_set_af_gain(int id, double value) {
   RECEIVER *rx = receiver[id];
   rx->volume = value;
   rx_set_af_gain(rx);
-  sliders_af_gain(id);
+  g_idle_add(sliders_af_gain, GINT_TO_POINTER(100 * suppress_popup_sliders + id));
 }
 
 void radio_set_agc_gain(int id, double value) {
@@ -2717,7 +2896,7 @@ void radio_set_agc_gain(int id, double value) {
 
   receiver[id]->agc_gain = value;
   rx_set_agc(receiver[id]);
-  sliders_agc_gain(id);
+  g_idle_add(sliders_agc_gain, GINT_TO_POINTER(100 * suppress_popup_sliders + id));
 }
 
 void radio_set_c25_att(int id, int val) {
@@ -2774,7 +2953,7 @@ void radio_set_c25_att(int id, int val) {
     }
   }
 
-  sliders_c25_att(id);
+  g_idle_add(sliders_c25_att, GINT_TO_POINTER(100 + id));
 }
 
 void radio_set_dither(int id, int value) {
@@ -2817,17 +2996,67 @@ void radio_set_preamp(int id, int value) {
     send_rxmenu(client_socket, id);
     return;
   }
+
+  //
+  // If this is RX1, store value "by the band"
+  //
+  if (id == 0) {
+    BAND *band = band_get_band(vfo[id].band);
+    band->preamp = value;
+  }
+}
+
+void radio_set_panhigh(int id, int value) {
+  if (id < receivers) {
+    receiver[id]->panadapter_high = value;
+  }
+
+  //
+  // If this is RX1, store value "by the band"
+  //
+  if (id == 0) {
+    BAND *band = band_get_band(vfo[id].band);
+    band->panhigh = value;
+  }
+}
+
+void radio_set_panlow(int id, int value) {
+  if (id < receivers) {
+    receiver[id]->panadapter_low = value;
+  }
+
+  //
+  // If this is RX1, store value "by the band"
+  //
+  if (id == 0) {
+    BAND *band = band_get_band(vfo[id].band);
+    band->panlow = value;
+  }
+
+  g_idle_add(sliders_panlow, NULL);
+}
+
+void radio_set_panstep(int id, int value) {
+  if (id < receivers) {
+    receiver[id]->panadapter_step = value;
+  }
+
+  //
+  // If this is RX1, store value "by the band"
+  //
+  if (id == 0) {
+    BAND *band = band_get_band(vfo[id].band);
+    band->panstep = value;
+  }
 }
 
 void radio_set_attenuation(int id, int value) {
-  if (id >= receivers) { return; }
-
-  if (!have_rx_att) { return; }
+  if (id >= receivers || !have_rx_att) { return; }
 
   int rxadc = receiver[id]->adc;
   adc[rxadc].attenuation = value;
   adc[rxadc].gain = 0.0;
-  sliders_attenuation(id);
+  g_idle_add(sliders_attenuation, GINT_TO_POINTER(100 * suppress_popup_sliders + id));
 
   if (radio_is_remote) {
     send_attenuation(client_socket, id, value);
@@ -2855,7 +3084,7 @@ void radio_set_drive(double value) {
   }
 
   transmitter->drive = value;
-  sliders_drive();
+  g_idle_add(sliders_drive, GINT_TO_POINTER(100 * suppress_popup_sliders));
 
   if (radio_is_remote) {
     send_drive(client_socket, value);
@@ -2893,46 +3122,66 @@ void radio_set_satmode(int mode) {
   sat_mode = mode;
 }
 
-void radio_apply_band_settings(int flag) {
+void radio_apply_band_settings(int flag, int id) {
+  ASSERT_SERVER();
   //
-  // This applies settings stored with the current BAND for VFO-A
-  // and for the transmitter. Settings include
+  // This applies settings stored with the current BAND for
+  // the VFO of receiver #id, and the transmitter
   //
   // flag == 0: RX Antenna, TX Antenna, PA dis/enable status
   // flag == 1: in addition, preamp/dither/attenuation/gain status
   //
   // flag is nonzero if called from a "real" band change
   //
-  const BAND *band = band_get_band(vfo[VFO_A].band);
-  suppress_popup_sliders = 1;
+  suppress_popup_sliders++;
+  int rxadc = 0;
+
+  if (id < receivers) {
+    rxadc = receiver[id]->adc;
+  }
+
+  const BAND *rxband = band_get_band(vfo[id].band);
 
   if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
-    adc[0].antenna = band->RxAntenna;
+    adc[rxadc].antenna = rxband->RxAntenna;
 
     if (can_transmit) {
-      band = band_get_band(vfo[vfo_get_tx_vfo()].band);
-      transmitter->antenna = band->TxAntenna;
+      const BAND *txband = band_get_band(vfo[vfo_get_tx_vfo()].band);
+      transmitter->antenna = txband->TxAntenna;
     }
 
     if (flag) {
-      adc[0].preamp = band->preamp;
-      adc[0].dither = band->dither;
+      adc[rxadc].preamp = rxband->preamp;
+      adc[rxadc].dither = rxband->dither;
 
-      if (filter_board == ALEX) {
-        adc[0].alex_attenuation = band->alexAttenuation;
+      if (filter_board == ALEX && rxadc == 0) {
+        adc[rxadc].alex_attenuation = rxband->alexAttenuation;
       }
     }
   }
 
   if (flag) {
-    radio_set_c25_att(0, -12 * band->alexAttenuation + 18 * (band->preamp + band->dither));
-    radio_set_attenuation(0, band->attenuation);
-    radio_set_rf_gain(0, band->gain);
+    if (filter_board == CHARLY25) {
+      radio_set_c25_att(0, -12 * rxband->alexAttenuation + 18 * (rxband->preamp + rxband->dither));
+    } else {
+      radio_set_attenuation(id, rxband->attenuation);
+      radio_set_rf_gain(id, rxband->gain);
+      radio_set_panhigh(id, rxband->panhigh);
+      radio_set_panlow(id, rxband->panlow);
+      radio_set_panstep(id, rxband->panstep);
+    }
+  }
+
+  //
+  // If a client is connected, update ADC0 data on the client side
+  //
+  if (remoteclient.running) {
+    send_adc_data(remoteclient.socket, rxadc);
   }
 
   schedule_high_priority();         // possibly update RX/TX antennas
   schedule_general();               // possibly update PA disable
-  suppress_popup_sliders = 0;
+  suppress_popup_sliders--;
 }
 
 void radio_tx_vfo_changed() {
@@ -3006,7 +3255,7 @@ void radio_set_split(int val) {
       send_split(client_socket, val);
     } else {
       radio_tx_vfo_changed();
-      radio_apply_band_settings(0);
+      radio_apply_band_settings(0, 0);
     }
 
     g_idle_add(ext_vfo_update, NULL);
@@ -3023,30 +3272,34 @@ static void radio_restore_state() {
   //
   GetPropI0("WindowPositionX",                               window_x_pos);
   GetPropI0("WindowPositionY",                               window_y_pos);
-  GetPropI0("display_zoompan",                               display_zoompan);
-  GetPropI0("display_sliders",                               display_sliders);
-  GetPropI0("display_toolbar",                               display_toolbar);
+  GetPropI0("slider_rows",                                   slider_rows);
+  GetPropI0("toolbar_rows",                                  toolbar_rows);
+  GetPropI0("display_width",                                 display_width[1]);
   GetPropI0("display_height",                                display_height[1]);
-  GetPropI0("vfo_layout",                                    vfo_layout);
+  GetPropI0("rx_stack_horizontal",                           rx_stack_horizontal);
+  GetPropI0("display_size",                                  display_size);
   GetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   GetPropI0("which_css_font",                                which_css_font);
   GetPropI0("vfo_encoder_divisor",                           vfo_encoder_divisor);
+  GetPropI0("vfo_snap",                                      vfo_snap);
   GetPropI0("mute_rx_while_transmitting",                    mute_rx_while_transmitting);
   GetPropI0("analog_meter",                                  analog_meter);
   GetPropI0("vox_enabled",                                   vox_enabled);
   GetPropF0("vox_threshold",                                 vox_threshold);
   GetPropF0("vox_hang",                                      vox_hang);
   GetPropI0("radio.hpsdr_server",                            hpsdr_server);
+  GetPropI0("radio.server_stops_protocol",                   server_stops_protocol);
   GetPropS0("radio.hpsdr_pwd",                               hpsdr_pwd);
   GetPropI0("radio.hpsdr_server.listen_port",                listen_port);
   GetPropI0("tci_enable",                                    tci_enable);
   GetPropI0("tci_port",                                      tci_port);
   GetPropI0("tci_txonly",                                    tci_txonly);
 
+  for (int i = 0; i < 6; i++) {
+    GetPropI1("display_vfobar[%d]", i,                       display_vfobar[i]);
+  }
+
   if (!radio_is_remote) {
-    GetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    GetPropI0("display_size",                                display_size);
-    GetPropI0("display_width",                               display_width[1]);
     GetPropI0("enable_auto_tune",                            enable_auto_tune);
     GetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     GetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);
@@ -3137,6 +3390,8 @@ static void radio_restore_state() {
   // GPIO, rigctl and MIDI should be
   // read from the local file on the client side
   ///
+  toolbar_restore_state();
+  sliders_restore_state();
   gpioRestoreActions();
   rigctlRestoreState();
 #ifdef MIDI
@@ -3166,6 +3421,7 @@ static void radio_restore_state() {
       display_width[1] = 640;
       display_height[1] = 400;
     }
+
     //
     // Assert that a standard size from the props file does not exceed the screen size
     //
@@ -3195,7 +3451,7 @@ static void radio_restore_state() {
   // If the N2ADR filter board is selected, this determines  most  OC settings
   //
   if (filter_board == N2ADR && !radio_is_remote) {
-    n2adr_oc_settings(); // Apply default OC settings for N2ADR board
+    radio_n2adr_oc_settings(); // Apply default OC settings for N2ADR board
   }
 
   //
@@ -3233,30 +3489,34 @@ void radio_save_state() {
   gtk_window_get_position(GTK_WINDOW(top_window), &window_x_pos, &window_y_pos);
   SetPropI0("WindowPositionX",                               window_x_pos);
   SetPropI0("WindowPositionY",                               window_y_pos);
-  SetPropI0("display_zoompan",                               hide_status ? old_zoom : display_zoompan);
-  SetPropI0("display_sliders",                               hide_status ? old_slid : display_sliders);
-  SetPropI0("display_toolbar",                               hide_status ? old_tool : display_toolbar);
+  SetPropI0("slider_rows",                                   hide_status ? old_slid : slider_rows);
+  SetPropI0("toolbar_rows",                                  hide_status ? old_tool : toolbar_rows);
   SetPropI0("display_height",                                display_height[1]);
-  SetPropI0("vfo_layout",                                    vfo_layout);
+  SetPropI0("rx_stack_horizontal",                           rx_stack_horizontal);
+  SetPropI0("display_size",                                  display_size);
+  SetPropI0("display_width",                                 display_width[1]);
   SetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   SetPropI0("which_css_font",                                which_css_font);
   SetPropI0("vfo_encoder_divisor",                           vfo_encoder_divisor);
+  SetPropI0("vfo_snap",                                      vfo_snap);
   SetPropI0("mute_rx_while_transmitting",                    mute_rx_while_transmitting);
   SetPropI0("analog_meter",                                  analog_meter);
   SetPropI0("vox_enabled",                                   vox_enabled);
   SetPropF0("vox_threshold",                                 vox_threshold);
   SetPropF0("vox_hang",                                      vox_hang);
   SetPropI0("radio.hpsdr_server",                            hpsdr_server);
+  SetPropI0("radio.server_stops_protocol",                   server_stops_protocol);
   SetPropS0("radio.hpsdr_pwd",                               hpsdr_pwd);
   SetPropI0("radio.hpsdr_server.listen_port",                listen_port);
   SetPropI0("tci_enable",                                    tci_enable);
   SetPropI0("tci_port",                                      tci_port);
   SetPropI0("tci_txonly",                                    tci_txonly);
 
+  for (int i = 0; i < 6; i++) {
+    SetPropI1("display_vfobar[%d]", i,                       display_vfobar[i]);
+  }
+
   if (!radio_is_remote) {
-    SetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    SetPropI0("display_size",                                display_size);
-    SetPropI0("display_width",                               display_width[1]);
     SetPropI0("enable_auto_tune",                            enable_auto_tune);
     SetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     SetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);
@@ -3343,6 +3603,8 @@ void radio_save_state() {
     vfo_save_state();
   }
 
+  toolbar_save_state();
+  sliders_save_state();
   gpioSaveActions();
   rigctlSaveState();
 #ifdef MIDI
@@ -3359,34 +3621,18 @@ int radio_remote_start(void *data) {
 
   for (unsigned int i = 0; i < strlen(property_path); i++) {
     if (property_path[i] == '/') { property_path[i] = '.'; }
+
+    if (property_path[i] == ' ') { property_path[i] = '-'; }
   }
 
   radio_is_remote = TRUE;
   optimize_for_touchscreen = 1;
   cw_keyer_internal = 0;
-
-  switch (controller) {
-  case CONTROLLER2_V1:
-  case CONTROLLER2_V2:
-  case G2_FRONTPANEL:
-    display_zoompan = 1;
-    display_sliders = 0;
-    display_toolbar = 0;
-    break;
-
-  default:
-    display_zoompan = 1;
-    display_sliders = 1;
-    display_toolbar = 1;
-    break;
-  }
-
   //
   // Read "local" data from the props file.
-  // For some cases this is only a small fraction, but
-  // for MIDI this  is the complete data set
   //
   radio_restore_state();
+  send_screen(client_socket, rx_stack_horizontal, display_width[display_size]);
   radio_create_visual();
   radio_reconfigure_screen();
 
@@ -3548,12 +3794,22 @@ int radio_max_band() {
   return max;
 }
 
+int radio_remote_protocol_stop(gpointer data) {
+  //
+  // stop protocol via GTK queue
+  //
+  radio_protocol_stop();
+  return G_SOURCE_REMOVE;
+}
+
 void radio_protocol_stop() {
   //
   // paranoia ...
   //
   radio_set_mox(0);
   usleep(100000);
+
+  if (!radio_protocol_running) { return; }
 
   switch (protocol) {
   case ORIGINAL_PROTOCOL:
@@ -3570,9 +3826,21 @@ void radio_protocol_stop() {
 #endif
     break;
   }
+
+  radio_protocol_running = 0;
+}
+
+int radio_remote_protocol_run(gpointer data) {
+  //
+  // start protocol via GTK queue
+  //
+  radio_protocol_run();
+  return G_SOURCE_REMOVE;
 }
 
 void radio_protocol_run() {
+  if (radio_protocol_running) { return; }
+
   switch (protocol) {
   case ORIGINAL_PROTOCOL:
     old_protocol_run();
@@ -3600,6 +3868,8 @@ void radio_protocol_run() {
 #endif
     break;
   }
+
+  radio_protocol_running = 1;
 }
 
 void radio_protocol_restart() {
@@ -3624,7 +3894,7 @@ static gpointer auto_tune_thread(gpointer data) {
   // but  it may stop tuning before.
   //
   int count = 0;
-  g_idle_add(ext_set_tune, GINT_TO_POINTER(1));
+  g_idle_add(ext_radio_set_tune, GINT_TO_POINTER(1));
 
   for (;;) {
     if (count >= 0) {
@@ -3634,12 +3904,12 @@ static gpointer auto_tune_thread(gpointer data) {
     usleep(50000);
 
     if (auto_tune_end) {
-      g_idle_add(ext_set_tune, GINT_TO_POINTER(0));
+      g_idle_add(ext_radio_set_tune, GINT_TO_POINTER(0));
       break;
     }
 
     if (count >= 200) {
-      g_idle_add(ext_set_tune, GINT_TO_POINTER(0));
+      g_idle_add(ext_radio_set_tune, GINT_TO_POINTER(0));
       count = -1;
     }
   }
