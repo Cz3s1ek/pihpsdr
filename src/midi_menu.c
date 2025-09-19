@@ -49,7 +49,7 @@ static GtkWidget *dialog = NULL;
 
 static GtkListStore *store;
 static GtkWidget *view;
-static GtkWidget *scrolled_window = NULL;
+static GtkWidget *sw = NULL;
 static gulong selection_signal_id;
 static GtkTreeModel *model;
 static GtkTreeIter iter;
@@ -152,7 +152,7 @@ static void update_wheelparams(gpointer user_data) {
   //       thre current type is a wheel. If it is a wheel,
   //       set spin buttons to current values.
   //
-  if (thisType == MIDI_WHEEL) {
+  if (thisType == AT_ENC) {
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(set_vfl1 ), (double) thisVfl1 );
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(set_vfl2 ), (double) thisVfl2 );
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(set_fl1  ), (double) thisFl1  );
@@ -197,7 +197,7 @@ static void type_changed_cb(GtkWidget *widget, gpointer data) {
 }
 
 static gboolean action_cb(GtkWidget *widget, gpointer data) {
-  if (thisType == TYPE_NONE) { return TRUE; }
+  if (thisType == AT_NONE) { return TRUE; }
 
   ignore_incoming_events = 1;
   thisAction = action_dialog(dialog, thisType, thisAction);
@@ -276,7 +276,7 @@ static void wheelparam_cb(GtkWidget *widget, gpointer user_data) {
   int val = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
   int newval = val;
 
-  if (thisType != MIDI_WHEEL) {
+  if (thisType != AT_ENC) {
     // we should never arrive here
     return;
   }
@@ -398,8 +398,8 @@ static void add_store(int key, const struct desc *cmd) {
                      BSTR_COLUMN, ActionTable[cmd->action].button_str,
                      -1);
 
-  if (scrolled_window != NULL) {
-    GtkAdjustment *adjustment = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW(scrolled_window));
+  if (sw != NULL) {
+    GtkAdjustment *adjustment = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW(sw));
 
     //t_print("%s: adjustment=%f lower=%f upper=%f\n",__FUNCTION__,gtk_adjustment_get_value(adjustment),gtk_adjustment_get_lower(adjustment),gtk_adjustment_get_upper(adjustment));
     if (gtk_adjustment_get_value(adjustment) != 0.0) {
@@ -679,13 +679,12 @@ void midi_menu(GtkWidget *parent) {
   g_signal_connect(ignore_b, "toggled", G_CALLBACK(ignore_cb), NULL);
   row++;
   col = 0;
-  scrolled_window = gtk_scrolled_window_new (NULL, NULL);
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-  height = display_height[display_size] - 180 -  15 * ((n_midi_devices + 1) / 3);
-
-  if (height > 400) { height = 400; }
-
-  gtk_widget_set_size_request(scrolled_window, 400, height);
+  sw= gtk_scrolled_window_new (NULL, NULL);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+  //Set scrollbar to ALWAYS be displayed and not as temporary overlay
+  g_object_set(sw , "overlay-scrolling", FALSE , NULL);
+  height = 300 -  15 * ((n_midi_devices + 1) / 3);
+  gtk_widget_set_size_request(sw, 400, height);
   view = gtk_tree_view_new();
   renderer = gtk_cell_renderer_text_new();
   gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(view), -1, "Event", renderer, "text", EVENT_COLUMN, NULL);
@@ -701,8 +700,8 @@ void midi_menu(GtkWidget *parent) {
                              G_TYPE_STRING, G_TYPE_STRING);
   load_store();
   gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(store));
-  gtk_container_add(GTK_CONTAINER(scrolled_window), view);
-  gtk_grid_attach(GTK_GRID(grid), scrolled_window, col, row, 5, 10);
+  gtk_container_add(GTK_CONTAINER(sw), view);
+  gtk_grid_attach(GTK_GRID(grid), sw, col, row, 5, 10);
   model = gtk_tree_view_get_model(GTK_TREE_VIEW(view));
   g_signal_connect(model, "row-inserted", G_CALLBACK(row_inserted_cb), NULL);
   GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(view));
@@ -730,7 +729,7 @@ void midi_menu(GtkWidget *parent) {
   col = 0;
   row = 0;
   // the new-line in the label get some space between the text and the spin buttons
-  lbl = gtk_label_new("Configure WHEEL parameters");
+  lbl = gtk_label_new("Configure Encoder parameters");
   gtk_widget_set_name(lbl, "boldlabel");
   gtk_widget_set_size_request(lbl, 300, 30);
   gtk_widget_set_halign(lbl, GTK_ALIGN_CENTER);
@@ -849,18 +848,18 @@ static int updatePanel(int state) {
 
     switch (thisEvent) {
     case MIDI_NOTE:
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KEY");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Button");
       gtk_widget_set_sensitive(newType, FALSE);
       break;
 
     case MIDI_CTRL:
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "WHEEL");
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KNOB/SLIDER");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Encoder");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Knob/Slider");
       gtk_widget_set_sensitive(newType, TRUE);
       break;
 
     case MIDI_PITCH:
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KNOB/SLIDER");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Knob/Slider");
       gtk_widget_set_sensitive(newType, FALSE);
       break;
 
@@ -898,20 +897,20 @@ static int updatePanel(int state) {
 
     switch (thisEvent) {
     case MIDI_NOTE:
-      thisType = MIDI_KEY;
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KEY");
+      thisType = AT_BTN;
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Button");
       gtk_combo_box_set_active (GTK_COMBO_BOX(newType), 0);
       gtk_widget_set_sensitive(newType, FALSE);
       break;
 
     case MIDI_CTRL:
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "WHEEL");
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KNOB/SLIDER");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Encoder");
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Knob/Slider");
 
-      if (thisType == MIDI_KNOB) {
+      if (thisType == AT_BTN) {
         gtk_combo_box_set_active (GTK_COMBO_BOX(newType), 1);
       } else {
-        thisType = MIDI_WHEEL;
+        thisType = AT_ENC;
         gtk_combo_box_set_active (GTK_COMBO_BOX(newType), 0);
       }
 
@@ -919,8 +918,8 @@ static int updatePanel(int state) {
       break;
 
     case MIDI_PITCH:
-      thisType = MIDI_KNOB;
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "KNOB/SLIDER");
+      thisType = AT_BTN;
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(newType), NULL, "Knob/Slider");
       gtk_combo_box_set_active (GTK_COMBO_BOX(newType), 0);
       gtk_widget_set_sensitive(newType, FALSE);
       break;
@@ -1000,7 +999,7 @@ static int ProcessNewMidiConfigureEvent(void * data) {
     thisVal = val;
     thisMin = val;
     thisMax = val;
-    thisType = TYPE_NONE;
+    thisType = AT_NONE;
     thisAction = NO_ACTION;
     //
     // set default values for wheel parameters

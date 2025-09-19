@@ -140,7 +140,7 @@ enum _header_type_enum {
   CLIENT_SERVER_COMMANDS,
 };
 
-#define CLIENT_SERVER_VERSION 0x01000019 // 32-bit version number
+#define CLIENT_SERVER_VERSION 0x01250001 // 32-bit version number
 #define SPECTRUM_DATA_SIZE 4096          // Maximum width of a panadapter
 #define AUDIO_DATA_SIZE 512              // 512 stereo samples
 
@@ -717,7 +717,6 @@ typedef struct __attribute__((__packed__)) _ps_data {
   HEADER header;
   uint16_t psinfo[16];
   uint16_t attenuation;
-  mydouble ps_getpk;
   mydouble ps_getmx;
 } PS_DATA;
 

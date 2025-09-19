@@ -636,7 +636,7 @@ to this natural width, such that the height of the peak (roughly) matches the si
 \label{fig:noisefloorzoom}
 \end{figure}
 
-To demonstrate this, I have moved the Zoom slider from 1 to 32, such that Fig. \ref{noisefloorzoom} results.
+To demonstrate this, I have moved the Zoom slider from 1 to 32, such that Fig. \ref{fig:noisefloorzoom} results.
 The noise floor has moved down to slightly less than --120 dBm as expected, since one pixel now only is 7.5 Hz wide.
 At the same time, the height of the signal peak remained at about --73 dBm. This demonstrates that
 the normalisation of the spectrum as chosen in \pH is such that the noise floor changes with screen width and/or
@@ -2999,15 +2999,13 @@ and 7101 kHz, are transmitted. If both carriers contain 25W power, this is
 a 100W PEP signal. Non-linearity of the PA first lead to the occurrence of harmonics
 (in this case around 14.2, 21.3, and 28.4 MHz). This is not a problem because
 such harmonics are  damped by the TX low-pass filters. Higher-order non-linear effects,
-however, lead to additional in-band signals, in our example they occur at
-7102/7099, 7103/7098 etc. kHz. The low-pass filters cannot eliminate these signals,
+however, lead to additional \textit{in-band} signals that cannot be filtered out.
+In our example they occur at
+7102/7099, 7103/7098 etc. kHz. Since these signals cannot be filtered out,
 they lead to unwanted signals (,,splatter'') that disturb QSOs on neighbouring
 frequencies. With PureSignal, you can greatly reduce these unwanted signals.
 If you open the \bltt{PS} menu for the first time it looks like shown in Fig.
 \ref{fig:PSMenu}.
-
-
-
 The elements have the following function:
 
 \rett{Enable PS}. With this check box, PS can be enabled/disabled.
@@ -3072,27 +3070,6 @@ However, if something changes (e.g. output power, or the finals get warm, etc.) 
 calibration is probably no longer valid but still kept. So unless you have good reason,
 do not use the \rett{OneShot} option.
 
-
-\rett{Feedback Lvl}. When doing a PS calibration through a two-tone experiment, this string
-turns red if the feedback level is good. It turns yellow if the feedback level is slightly
-to weak and read if it is too weak. A blue colour indicates a too string feedback level.
-The feedback level reported by the PS calibration algorithm is further reported in the
-,,feedbk'' field. The optimum value is about 154.
-
-\rett{Correcting}. When doing a PS calibration through a two-tone experiment, this string
-is green if calibration was successful and PS correction takes place, and the string is
-red if no good calibration could be made.
-
-\rett{TX ATT}. This element can occur both as a text field or as a spin button.
-If PURESIGNAL is enabled while \rett{Auto Attenuate} is not enabled, it is a spin button with which
-you can manually adjust the RF attenuation. For normal HPSDR radios, this is a value
-between 0 and 31, other radios such as the HermesLite have an extended range from
--29 to 31. If the feedback level is too strong, this value must be increased, if it
-is too strong, it must be decreased. It is, however, recommended to enable \rett{Auto Attenuate}.
-In this case, the \rett{TX ATT} just shows the current attenuation.
-Note that if \texttt{PURESIGNAL} is not enabled, the RF input attenuators
-will automatically be set to maximum attenuation while transmitting with the PA enabled.
-
 \rett{SetPk}. This field shows the currently assumed value of the peak value of the TX DAC
 feedback signal. \pH chooses is automatically, depending on the radio hardware.
 The standard value for Protocol-1 and Protocol-2 radios are 0.407 and 0.290. Notable exceptions are
@@ -3116,6 +3093,41 @@ or the correct value is again entered in the \rett{SetPk} field. This \textit{ca
 applies if you upgrade your radio firmware from protocol-1 to protocol-2, since then your props
 file still contains the correct protocol-1 value (0.4067) and you have
 to manually modify the \rett{SetPk} value (in this case, to 0.2899).
+
+\rett{TX ATT}. This element can occur both as a text field or as a spin button.
+If PURESIGNAL is enabled while \rett{Auto Attenuate} is \textit{not} enabled, it is a spin button with which
+you can manually adjust the RF attenuation. For normal HPSDR radios, this is a value
+between 0 and 31, other radios such as the HermesLite have an extended range from
+-29 to 31. If the feedback level is too strong, this value must be increased, if it
+is too strong, it must be decreased. It is, however, recommended to enable \rett{Auto Attenuate}.
+In this case, the \rett{TX ATT} field is a text field that shows the current attenuation.
+Note that if \texttt{PURESIGNAL} is not enabled, the RF input attenuators
+will automatically be set to maximum attenuation while transmitting with the PA enabled.
+
+All other fields are not meant for user input, they just give information on the status
+of the \texttt{PURESIGNAL} engine.
+
+\rett{Feedback Lvl}. When doing a PS calibration through a two-tone experiment, this string
+turns red if the feedback level is good. It turns yellow if the feedback level is slightly
+to weak and read if it is too weak. A blue colour indicates a too strong feedback level.
+The feedback level reported by the PS calibration algorithm is further reported in the
+\rett{feedbk} field. The optimum value is about 154.
+
+\rett{Correcting}. When doing a PS calibration through a two-tone experiment, this string
+is green if calibration was successful and PS correction takes place, and the string is
+red if no good calibration could be made.
+
+The other fields give more information on the \texttt{PURESIGNAL} engine, consult the
+WDSP manual. Noteworthy is the \rett{GetPk} field, that reports the maximum amplitude
+seen in the TX feedback samples. This value remains blank or zero until PS starts working.
+It should be close (ideally, slightly below) the value in the \texttt{SetPk} field.
+If not, then you either have non-standard hardware where \pH does not have a good
+default SetPK value, or the default value has been modified (probably upon startup
+when reading the props file). The field \rett{corr.cnt} shows a running count of corrections
+made during the two-tone experiment. When PS is working, this number should be constantly
+increasing. The \rett{status} field shows the current states of
+the PS engine, which is cycling during normal operation. If the PS engine is halted,
+the status becomes \bltt{Reset}.
 
 \begin{figure}[t!]
 \center
@@ -3153,9 +3165,12 @@ two peaks on the TX pan-adapter during the two-tone experiment.
 \end{figure}
 
 To demonstrate how PURESIGNAL works, I show an example performed with a Hermes\-Lite-II
-radio running Protocol-1. The radio runs at a sample rate of 96 kHz, since it is my
+radio running Protocol-1. The radio runs at a sample rate of 192 kHz, since it is my
 experience that PURESIGNAL does not work too well in Protocol-1 when it is run
-at 48 kHz. I also activated the optional ``peak labelling''
+at 48 kHz (with 96 or 192 kHz I never see such problems). Note that for Protocol-2 radios
+the PURSESIGNAL engine runs at the fixed TX sample rate (192 kHz) and is completely independent
+on the sample rate of the receiver(s).
+I also activated the optional ``peak labelling''
 in the \bltt{TX Menu} such that the four main peaks heights are also printed
 (in dBm) on the screen. Checking both \rett{Enable PS} and
 \rett{Auto Attenuation}, and hitting the \rett{Two Tone} button, it needs only few
@@ -3163,8 +3178,8 @@ seconds to stabilise and then Fig. \ref{fig:PSnomon} results, where the TX
 spectrum scope and the PS menu window have been arranged such that they do
 not cover each other. Although both the PS menu and the spectrum scope state
 that PS is working and correcting, the signal does not look good: a two-tone
-signal should only have two peaks, but here one sees the two main peaks at $-7$ dBm
-and two IM3 satellites at about $-43$ dBm (this amounts to an IM3 value of only $-36$ dBc).
+signal should only have two peaks, but here one sees the two main peaks at $-6$ dBm
+and two IM3 satellites at about $-41$ dBm (this amounts to an IM3 value of only $-35$ dBc).
 The reason for this seemingly bad performance is of course, that the TX spectrum scope
 normally shows the signal that is \textit{sent} to the PA, so we see a signal that
 is distorted on purpose, and magically
@@ -3174,15 +3189,15 @@ is actually transmitting, one must
 activate the \rett{MON} button such that it is highlighted.
 This is shown in Fig. \ref{fig:PSmon}, where one sees the
 feedback signal, that is, what the PA sends to the antenna.
-This is a much cleaner two-tone signal (the IM3 value is about $-50$ dBc).
+This is a much cleaner two-tone signal (the IM3 value is about $-57$ dBc).
 To demonstrate how effective the PS algorithm is,
 I have pushed the \rett{OFF} button which stops the PureSignal correction, the result
 is shown in Fig. \ref{fig:PSoff}. After hitting that button, IM3 satellites immediately
 grow and IM3 decreases to
 about $-35$ dBc which reflects the intrinsic
 non-linearity of the PA.
-Note that this is still a quite acceptable value.
-Unless you have a class-A amplifier, your PA probably won't be much better.
+Note that this is still a quite acceptable value:
+unless you have a class-A amplifier, your PA probably won't be much better.
 This experiment demonstrates that adaptive pre-distortion is a mechanism that allows you to produce a clean
 signal with a quality that would be impossible (or \textit{very} difficult) to achieve
 with traditional hardware.
@@ -3536,8 +3551,8 @@ bit pattern.
 
 For non-HPSDR radios, the \bltt{OC} menu does not appear in the main menu. Since
 transverter bands are also shown at the bottom of the list, the \bltt{OC}
-menu may become rather high, in this case its height is restricted to the
-screen size and a vertical scroll bar is added.
+menu may become rather tall, so a scroll bar may appear on at the right
+margin for small screens.
 
 To facilitate control of an automatic tuner, there are seven \rett{TuneBits}
 which are OR-ed with the bit pattern chosen for TX on the actual band,
@@ -3545,7 +3560,9 @@ as long as you are TUNE-ing with \pH. Besides the \bltt{Tune} command,
 there are the \bltt{Tune Full} and \bltt{Tune Mem} commands which are
 functionally equivalent, except that the open collector tuning pattern
 is removed for \bltt{Tune Full} after the full tune delay, and for \bltt{Tune Mem}
-after the memory tune delay, which can also be specified in this menu.
+after the memory tune delay, which can also be specified in this menu
+(spin-buttons below \rett{Full Tune(ms)} and \rett{Memory Tune(ms)},
+the values are in milli-seconds).
 This can be used to send tuning pulsed of varying length to the
 external automatic tuner at the beginning of the tuning. If the open collector
 outputs are not used, or if the \rett{TuneBits}  are all unchecked, there is
@@ -3560,7 +3577,10 @@ case if you are working with a HermesLite-II radio). This means that
 you \textit{can} change the \bltt{OC} patterns when using the \texttt{N2ADR} filter board
 (e.g. for experimental purposes), but
 these changes are lost once you select another filter board and then select \texttt{N2ADR} again,
-and also upon the next program start.
+and also upon the next program start. At the right margin of the menu, you see a scroll bar
+and you usually need to scroll down to see/modify the OC settings for the upper bands:
+at the bottom of Fig. \ref{fig:OCMenu} you see the settings for the 12m band but when you
+scroll down, those for the 10m and 6m band (and possibly transverter bands) also appear.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -3591,8 +3611,8 @@ configured via the Toolbar menu.
 We start with the "Toolbar" menu, that can be found at the top of the rightmost
 column in the main menu. The toolbar consists of eight buttons that can be assigned
 to a set of eight functions. There are six such sets, and pressing the rightmost button
-of the toolbar cycles through these six sets. The text on the rightmost toolbar button, \rett{FNC(0)}, indicates which
-layer is currently active.
+of the toolbar cycles through these six sets. The text on the rightmost toolbar button, \rett{FNC(x)}, indicates which
+layer (x runs from 0 to 5)is currently active.
 
 \begin{figure}[ht!]
 \center
@@ -3603,29 +3623,21 @@ layer is currently active.
 
 If the \bltt{Toolbar} menu is opened, it looks like Fig. \ref{fig:ToolbarMenu1}.
 The rows correspond to the six different layers, and the rightmost button in each
-row indicates to which layer this row belongs.
-If one now clicks (just an example)
-the \texttt{CTUN} button (third button in the second row) a ,,command dialog'' pops up that looks as
+row indicates to which layer this row belongs. Now imagine we want to replace
+the \bltt{CTUN} command by \bltt{Duplex} in the row \rett{FNC(1)}. To this end
+we click the \bltt{CTUN} button (marked with a red circle) and
+a  ,,chooser dialog'' pops up that looks as
 in Fig. \ref{fig:ToolbarMenu2}.
 
 
-\begin{figure}[ht!]
-\center
-\includegraphics[scale=0.45]{ToolbarMenu3.png}
-\caption{Just selected \texttt{Band20}.}
-\label{fig:ToolbarMenu3}
-\end{figure}
+Because the list of possible functions to choose from is so long, the height of the menu
+is restricted even if screen space permits, so it always contains a scrollbar at the right
+margin that you may need to use to scroll through the list of functions.
+The current command selected (\texttt{CTUN}) is high-lighted (you may need to scroll down
+to see it). Then click the button labelled with \bltt{Duplex} (in this example you can
+already see it, but again it may be necessary to scroll down). After clicking the desired
+button, that one gets highlighted.
 
-The current command selected (\texttt{CTUN}) is high-lighted. Lists of possible commands can be rather long,
-so it might be necessary that you have to scroll up or down in such an command dialog until you have
-found what you were looking for. Now (again just an example) the button \texttt{Band 20} has been clicked
-in the command dialog, such that it gets high-lighted (Fig. \ref{fig:ToolbarMenu3}).
-
-If one now closes the command dialog by clicking the \texttt{OK} button, the command select menu
-closes and on sees that in the toolbar menu now reappearing (Fig. \ref{fig:ToolbarMenu4}), the third button
-in the second
-line of the toolbar menu has changed, it now gives the short text (\texttt{20}) of the command, which will
-switch the active receiver to the 20m band (see the explanation of all the commands in Appendix A).
 
 \begin{figure}[ht!]
 \center
@@ -3634,27 +3646,20 @@ switch the active receiver to the 20m band (see the explanation of all the comma
 \label{fig:ToolbarMenu4}
 \end{figure}
 
-You also see that the toolbar itself has not changed, because we have just changed the \texttt{FNC(1)} set,
-while currently the \texttt{FNC(0)} set is active. If one now, however, clicks the rightmost
-toolbar button with the text \texttt{FNC(0)} one advances to the next set and the toolbar labels
-are updated (Fig. \ref{fig:ToolbarMenu5}).
+In the top row of the chooser menu, you find two buttons. Pressing \rett{Cancel} closes it
+without any effect (your choice is not reported back), while pressing \rett{Choose} closes
+the menu and reports back your choice, that is, the function currently highlighted.
+So pressing \rett{Choose} after having chosen the \bltt{Duplex} function, the chooser
+menu closes
+and one sees that in the toolbar menu now reappearing (Fig. \ref{fig:ToolbarMenu4}), the third button
+in the line \rett{FNC(1)} (marked by a red circle) has changed,
+it now gives the short text (\texttt{DUP}) of the \bltt{Duplex} command. You can also see
+that the \rett{FNC(1)} toolbar at the bottom of the screen has adopted the change
+(also marked with a red circle), so
+after closing the toolbar menu you can enable/disable \bltt{Duplex} with just one mouse click,
+without first opening the \bltt{Radio} menu.
 
-\begin{figure}[ht!]
-\center
-\includegraphics[scale=0.45]{ToolbarMenu5.png}
-\caption{The new \texttt{F1} layer is operative.}
-\label{fig:ToolbarMenu5}
-\end{figure}
 
-It can be seen that the text of the first seven toolbar buttons has changed to reflect
-the functions of the \texttt{F1} set, and also the rightmost button (which is always mapped
-to \bltt{Function}) has changed to \texttt{FNC(1)} in order to indicate the \texttt{F1}
-layer is now active. For mouse users (only), a secondary click on the rightmost toolbar
-button cycles through the layers in in reverse order.
-
-Note that it is not possible to change the assignment of the  rightmost button of the toolbar,
-it will always be assigned to \bltt{Function}, since if one has no access to this
-function, one is stuck and can no longer cycle through the function layers.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{The \texttt{Sliders} Menu}
@@ -3668,8 +3673,22 @@ function, one is stuck and can no longer cycle through the function layers.
 \end{figure}
 
 The sliders lets you assign function to the nine sliders in the 3x3 Sliders area. It does not matter
-how many slider rows (0 to 3) are actually shown, you can assign a function to all nine sliders.
-The functions you can assign are (in the order they appear in the combo-boxes). Since the space
+how many slider rows (0 to 3) are actually shown, you can assign a function to all nine sliders
+using the same type of dialog used for assigning functions to toolbar buttons (see previous section).
+
+For example, a CW operator usually does not need to adjust the Mic gain, the TX compressor, the Squelch
+level or the VOX threshold. But
+this operator may find it convenient to have a slider at hand that adjusts the CW speed. With an
+individually configured Slider area, it should be possible to have only two rows of sliders on display
+in most situations. It is possible to assign the same function to more than one slider, but a given
+function will only be assigned to one slider (the first one if going throught the sliders row-wise).
+So in case of a duplicate assignment, the second slider position will just be empty.
+Note that RF gain and Attenuation are mutually exclusive, since a given radio either has a programmable
+RF gain (HermesLite-II, RadioBerry, SoapySDR radios) or a programmable attenuator (most HPSDR radios).
+
+The functions, as all \pH functions, are described in Appendix \ref{sec:commandlist} but for
+the convenience of the reader, those functions which can be assigned to sliders in the Slider area
+are listed here. Since the space
 on screen is scarce for labelling the sliders, the acronym used there is also given in parentheses.
 
 \begin{itemize}
@@ -3696,15 +3715,7 @@ slider, there appears a check-box that enables or disables squelch.}
 \item[\rett{Zoom}]{(Zoom) The ZOOM value for the panadapter of the active receiver.}
 \end{itemize}
 
-For example, a CW operator usually does not need to adjust the Mic gain, the TX compressor, the Squelch
-level or the VOX threshold. But
-this operator may find it convenient to have a slider at hand that adjusts the CW speed. With an
-individually configured Slider area, it should be possible to have only two rows of sliders on display
-in most situations. It is possible to assign the same function to more than one slider, but a given
-function will only be assigned to one slider (the first one if going throught the sliders row-wise).
-So in case of a duplicate assignment, the second slider position will just be empty.
-Note that RF gain and Attenuation are mutually exclusive, since a given radio either has a programmable
-RF gain (HermesLite-II, RadioBerry, SoapySDR radios) or a programmable attenuator (most HPSDR radios).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{The \texttt{CAT/TCI} Menu}
 
@@ -3870,15 +3881,16 @@ the \pH MIDI configuration menu must be flexible enough to handle all these situ
 From this it is clear that within \pH, we have to distinguish three types of sources
 of MIDI commands:
 
-\rett{KEY}. This type is generated by NoteOn/Off MIDI events. \pH commands (,,Actions'') that
+\rett{Button}. This type is generated by NoteOn/Off MIDI events. \pH commands (,,Actions'') that
 can be assigned to this type are typically those which can also be assigned to toolbar
 buttons.
 
-\rett{KNOB/SLIDER}. This type is generated by ControllerChange MIDI events. It can be used
+\rett{Knob/Slider}. This type is generated by ControllerChange MIDI events. It can be used
 for \pH functions that are usually controlled by a slider, such as adjusting the AF
-volume, setting the TX drive, setting the AGC gain, etc.
+volume, setting the TX drive, setting the AGC gain, etc. The characteristic of such
+a control element that it reports values in a fixed range.
 
-\rett{WHEEL}. This type is also generated by ControllerChange MIDI events. This means
+\rett{Encoder}. This type is also generated by ControllerChange MIDI events. This means
 that if such an event is configured, the user has to decide whether this event
 originated from a potentiometer or from a rotary encoder. The prototypical \pH
 function controlled by a WHEEL is a VFO knob, which you can spin forever. However,
@@ -3903,8 +3915,6 @@ for taking care of the buttons/encoders and the CW key).
 
 If you open the \bltt{MIDI} menu for the first time, it presents itself as shown
 in Fig. \ref{fig:MIDImenu1}.
-
-
 
 At the top of the menu, besides the close button, you find a list of MIDI devices
 in the system, each of which with a check box. In Fig. \ref{fig:MIDImenu1}, there is only
@@ -3933,7 +3943,7 @@ is fine for most applications.
 \begin{figure}[ht]
 \center
 \includegraphics[scale=0.45]{MIDImenu2.png}
-\caption{The MIDI menu, VFO wheel turned.}
+\caption{The MIDI menu, VFO dial turned.}
 \label{fig:MIDImenu2}
 \end{figure}
 
@@ -3941,7 +3951,7 @@ It is important to note that as long as the MIDI menu is open, the radio cannot 
 operated through MIDI since all MIDI messages are captured by the menu and
 displayed. This is used to implement a ,,self-learning'' configuration. To explain
 this in detail, we demonstrate how to configure MIDI such that the big wheel on the
-controller is used as a VFO knob. After I have activated the checkbox of our
+controller is used as a VFO dial. After I have activated the checkbox of our
 MIDI device, I just turned the big wheel of the MIDI console a bit. This resulted
 in a menu window that is shown in Fig. \ref{fig:MIDImenu2}. In the third line,
 below \rett{Event}, you see \texttt{CTRL} which indicates that the last MIDI messages
@@ -3958,10 +3968,10 @@ depending on the position of the potentiometer.
 Below \rett{Channel}, you see the value zero which
 indicates that the channel number of that MIDI message was 1 (see above on the
 different channel numbering). Below \rett{Type}, you see a pop-down menu, here
-you can choose between \rett{WHEEL} and \rett{Knob/Slider}. In the example shown,
-it must be a \rett{WHEEL} since this is a rotary encoder. Because there is no
+you can choose between \rett{Encoder} and \rett{Knob/Slider}. In the example shown,
+it must be an \rett{Encoder} since this is a rotary encoder. Because there is no
 standard how the values map to increments, a separate panel
-\rett{Configure WHEEL parameters} pops up when a wheel is to be configured.
+\rett{Configure Encoder parameters} pops up when an encoder is to be configured.
 Here one has to define ranges of values that apply for very fast left turns,
 fast left turns, normal left turns, normal right turns, fast right turns,
 and very fast right turns. Specifying an interval from $-1$ to $-1$ means that
@@ -3982,9 +3992,9 @@ to a right turn.
 \label{fig:MIDImenu4}
 \end{figure}
 Now we have to specify which \pH function should be triggered when moving the wheel.
-The current command is shown in a button below the string \rett{Action} and defaults to \bltt{NONE}.
+The current command is shown in a button below the string \rett{Action} and defaults to \bltt{None}.
 By clicking this button, a dialog to choose the function opens as described for the
-\bltt{Toolbar} menu (chapter \ref{sec:toolbarmenu}), with the current choice (\bltt{NONE})
+\bltt{Toolbar} menu (chapter \ref{sec:toolbarmenu}), with the current choice (\bltt{None})
 highlighted. The only difference is that now only functions are listed that can be
 assigned to encoders.
 Because we want to assign the wheel to the \bltt{VFO} function, we click
@@ -4861,11 +4871,12 @@ command in the following table, there is a long and a short string assigned. The
 when there is enough space, while the short string is used for small buttons and to store commands in
 preference files (therefore the short strings never contain a blank character or a line break). Then, for
 each command we give the type of control element allowed for this command as a combination of the letters B,
-P, E, which stand for
+P, S, E, which stand for
 
 \begin{itemize}[font=\texttt, left=0pt]
 \item[B] {"Button": A button in the toolbar, or a push-button or switch on a GPIO or MIDI connected console}
 \item[P] {"Potentiometer": A potentiometer or a slider on a MIDI connected console}
+\item[S] {"Slider": A slider in the Slider area}
 \item[E] {"Encoder": A rotary encoder on a GPIO or MIDI connected console}
 \end{itemize}
 
@@ -4884,11 +4895,11 @@ a slider/potentiometer, the values from min to max are simple mapped to the TX d
 the signals from an encoder will just increase or decrease the value until one of a limits has been reached.
 
 All ,,button'' commands can be assigned to toolbar buttons via the \bltt{TOOLBAR} menu
-(see Sec. \ref{sec:toolbarmenu}). Some of the ,,potentiometer'' commands are by default connected
-with sliders in the Zoom/Pan or the Slider area (see Sec. \ref{sec:ZoomPanArea} and \ref{sec:SliderArea}).
-This is then indicated in the following description in red colour. Note that some ,,button''commands
-can also be triggered through check-boxes in the menus, and some ,,potentiometer'' commands can be controlled
-by sliders in the menus. This is described in the preceding sections.
+(see Sec. \ref{sec:toolbarmenu}). Some (but not all) ,,potentiometer'' commands can
+be assigned to sliders in the Slider area.
+Note that some ,,button'' and some ,,potentiometer'' commands
+can also be triggered through check-boxes, sliders, or spin-buttons in the menus.
+This is described in the preceding sections.
 
 In the following, the commands are alphabetically sorted by their long name, with the "empty" command listed
 first.
@@ -4907,10 +4918,10 @@ first.
 }
 
 
-\phcommand{NONE}{NONE}{BPE}{This is a command which does nothing. It can be assigned to buttons or enco\-ders
+\phcommand{NONE}{NONE}{BPSE}{This is a command which does nothing. It can be assigned to buttons or enco\-ders
 that
 are often accidentally operated. Some MIDI consoles, for example, report a button press event if the VFO
-knob is touched, and this we want to ignore.}
+knob is touched, and this we want to be able to ignore.}
 
 \phcommand{A<>B}{A<>B}{B}{Swap VFOs A and B. This will not only swap the frequencies, but also all other
 settings
@@ -4921,7 +4932,6 @@ associated with that VFO, such as mode, filter, CTUN, and RIT settings.}
 \phcommand{A>B}{A>B}{B}{Copy VFO A to VFO B.}
 
 \phcommand{AF Gain}{AFGAIN}{PE}{
-{\color{red} This command is connected to the \texttt{AF Gain} slider in the slider area.}
 Change the AF gain (headphone volume, $-40\ldots 0$ dB) of the active receiver.}
 
 \phcommand{AF Gain RX1}{AFGAIN1}{PE}{Change the AF gain (headphone volume, $-40\ldots 0$ dB) of the RX1 receiver.}
@@ -4932,8 +4942,7 @@ a no-op if only one receiver is running.}
 \phcommand{AGC}{AGCT}{B}{
 Cycle through the AGC modes (slow, medium, fast, $\ldots$) of the current receiver.}
 
-\phcommand{AGC Gain}{AGCGain}{PE}{
-{\color{red} This command is connected to the \texttt{AGC} slider in the slider area.}
+\phcommand{AGC Gain}{AGCGain}{PSE}{
 Change AGC gain ($-20\ldots 120$ dB) of the active receiver. Changing the AGC gain moves the
 horizontal green line (doted by a green 'G') on the pan adapter. Its optimal position is
 at or slightly below the noise floor level.}
@@ -4947,8 +4956,7 @@ only one receiver is running.}
 
 \phcommand{ANF}{ANF}{B}{Toggles the state (on/off) of the automatic notch filter for the active receiver.}
 
-\phcommand{Atten}{ATTEN}{PE}{
-{\color{red} This command is connected to the \texttt{ATT} slider in the slider area.}
+\phcommand{Atten}{ATTEN}{PSE}{
 Changes the value (0-31 dB) of the step attenuator of the active receiver.
 This function is only available for radios that have such an attenuator. Increasing the attenuation
 is required if ADC overload occurs, otherwise there is little reason for having high attenuation.
@@ -5103,7 +5111,7 @@ in detail in chapter \ref{sec:capture}.}
 {Toggle the state (on/off) of the compressor used in the TX audio input. Note that the CESSB overshoot
 correction is automatically engaged when using compression.}
 
-\phcommand{Cmpr Level}{COMPVAL}{PE}
+\phcommand{Cmpr Level}{COMPVAL}{PSE}
 {Change the value of the compressor (0-20 dB) used in the TX audio input. The compressor is automatically
 switched on (off) if the "new" value of the compressor is larger then  (equal to) zero.}
 
@@ -5134,7 +5142,7 @@ controller to which a Morse paddle is attached, and works with the iambic keyer 
 This keyer
 is only active if CW is \textit{not} handled in the radio (see CW menu).}
 
-\phcommand{CW Speed}{CWSPD}{PE}
+\phcommand{CW Speed}{CWSPD}{PSE}
 {Change the CW side tone frequency in the range 1-60 wpm. This affect the built-in iambic keyer or the keyer
 inside the radio,
 depending on whether CW is handled in the radio or not (see CW menu).}
@@ -5243,7 +5251,7 @@ This change is temporary, see the remark in the \bltt{Filter Cut Low} command.}
 \phcommand{IF Width RX2}{IFWIDTH2}{E}{Change the width of the filter of the receiver RX2.
 This change is temporary, see the remark in the \bltt{Filter Cut Low} command.}
 
-\phcommand{Linein Gain}{LIGAIN}{PE}{Change the line-in gain of the radio. If the
+\phcommand{Linein Gain}{LIGAIN}{PSE}{Change the line-in gain of the radio. If the
 radio does not have a line-in input, this control has no effect.}
 
 \phcommand{Lock}{LOCK}{B}{Lock the VFOs. A locked VFO will not accept VFO frequency steps in either direction,
@@ -5254,8 +5262,7 @@ are still possible, though. The command is intended to guard against accidentall
 
 \phcommand{Memory Menu}{MEM}{B}{Open the \texttt{MEM} (Memory) menu (see Chapter \ref{sec:memmenu}).}
 
-\phcommand{Mic Gain}{MICGAIN}{PE}{
-{\color{red} This command is connected to the \texttt{Mic Gain} slider in the slider area.}
+\phcommand{Mic Gain}{MICGAIN}{PSE}{
 Change the mic gain (from -12 to 50 dB). The amplification of the microphone
 audio data is done in software, and applies to the TX audio
 input samples wherever they come from. (See the discussion of local microphones in the \texttt{TX} menu.}
@@ -5347,8 +5354,7 @@ For example, to go to 7.040 MHz, one can enter the
 sequence ,,7'',  ,,0'', ,,4'', ,,0'', ,,0'', ,,0'', ,,0''. This
 is rarely used but offers Hz-resolution for the direct frequency entry.}
 
-\phcommand{PanZoom}{PAN}{E}{
-{\color{red} This command is connected to the \texttt{Pan} slider in the Zoom/Pan area.}
+\phcommand{PanZoom}{PAN}{PSE}{
 Change the Pan value. Note the PAN value has no effect if Zoom equals unity. The PAN value
 goes from 0 (show leftmost part) and 100 (show rightmost part of the spectrum).}
 
@@ -5360,7 +5366,7 @@ goes from 0 (show leftmost part) and 100 (show rightmost part of the spectrum).}
 of the active receiver. Values outside
 this range can be set in the \texttt{DISPLAY} menu.}
 
-\phcommand{Panadapter Low}{PANL}{PE}{Change the dBm value (from -160 to -60) at the bottom of the spectrum
+\phcommand{Panadapter Low}{PANL}{PSE}{Change the dBm value (from -160 to -60) at the bottom of the spectrum
 scope of the active receiver.
 Values outside this range can be set in the \texttt{DISPLAY} menu.}
 
@@ -5389,8 +5395,7 @@ the press and release events are significant.}
 \phcommand{Rcl 1$\ldots$Rcl 9}{RCL1$\ldots$RCL9}{B}{The same as \bltt{Rcl 0}, except that memory slots 1 through 9
 are referred to.}
 
-\phcommand{RF Gain}{RFGAIN}{PE}{
-{\color{red} This command is connected to the \texttt{RF Gain} slider in the slider area.}
+\phcommand{RF Gain}{RFGAIN}{PSE}{
 Set the gain of the RF front end of the active receiver. Only effective for
 radios that have such a
 gain control. Most HPSDR radios do not have RF  gain, they have a step attenuator in the RF front end
@@ -5493,8 +5498,7 @@ transmitted when doing split and using the microphone. Normally one
 starts with the \bltt{A>B} command (that is, copy VFO-A to VFO-B), and
 then adjusts the transmit frequency.}
 
-\phcommand{Squelch}{SQUELCH}{PE}{
-{\color{red} This command is connected to the \texttt{Sqlch} slider in the slider area.}
+\phcommand{Squelch}{SQUELCH}{PSE}{
 Change the squelch threshold value of the active receiver. Squelch is
 automatically enabled (disabled) if
 the resulting value  is non-zero (zero).}
@@ -5548,9 +5552,8 @@ open collector bits which became active at the beginning of the TUNE cycle will 
 after the "memory tune" delay (to be specified in the \bltt{OC} menu). Note the TUNEing itself will continue
 after that.}
 
-\phcommand{TX Drive}{TXDRV}{PE}{
-{\color{red} This command is connected to the \texttt{TX Drv} slider in the slider area.}
-Set the TX drive level (0-100).}
+\phcommand{TX Drive}{TXDRV}{PSE}{
+Set the TX drive (RF output) level (0-100).}
 
 \phcommand{TX Menu}{TX}{B}{Opens the \texttt{TX} menu.}
 
@@ -5581,7 +5584,7 @@ jump to the smallest.}
 transmitter
 by talking into the microphone, without the need to press a PTT button. See the \texttt{VOX} menu.}
 
-\phcommand{VOX Level}{VOXLEV}{E}{Change the VOX level threshold. If  you operate VOX, and the radio does not go
+\phcommand{VOX Level}{VOXLEV}{PSE}{Change the VOX level threshold. If  you operate VOX, and the radio does not go
 TX
 while talking into the  microphone, decrease the VOX threshold. If the radio goes TX simply because the
 neighbour's
@@ -5631,8 +5634,7 @@ on the toolbar, or on a GPIO or MIDI console), there is an auto-repeat such that
 every 250 msec until
 the XIT+ button is released.}
 
-\phcommand{Zoom}{ZOOM}{PE}{
-{\color{red} This command is connected to the \texttt{Zoom} slider in the Zoom/Pan area.}
+\phcommand{Zoom}{ZOOM}{PSE}{
 Change the ZOOM value (1...32) of the active receiver.}
 
 \phcommand{Zoom -}{ZOOM-}{B}{Decrease the ZOOM value of the active receiver by one. If the ZOOM value was
@@ -7010,7 +7012,7 @@ namely
 \end{itemize}
 
 Case a) requires that the check box \rett{CW handled in Radio} within the \bltt{CW} menu
-is active. On the other hand, cases b) and c) require that this box is inactive. 
+is active. On the other hand, cases b) and c) require that this box is inactive.
 Because it is very difficult to get a CW side tone with very small latency from
 within \pH, these to cases are not recommended.
 Cases
@@ -7086,7 +7088,7 @@ All lines are active-low lines with a pull-up, so the active state is reached
 by connecting the input line to ground. See Appendix \ref{sec:commandlist} for
 an explanation of the commands. Briefly, use \bltt{CW Left} and \bltt{CW Right}
 when using the \pH internal iambic keyer, and use \bltt{PTT (keyer)} and
-\bltt{CW Key (keyer)} when using an external keyer. 
+\bltt{CW Key (keyer)} when using an external keyer.
 The external keyer must generate both a key-down and a PTT signal, and it must be configured
 such that the PTT signal arrives earlier than the first key-down. The required time
 delay between PTT and the first key-down depends  on how fast \pH can do the
